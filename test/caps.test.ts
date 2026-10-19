@@ -1,0 +1,132 @@
+import { describe, it, expect } from 'vitest';
+import { connect, account, smallPolicy, MockData } from './helpers.js';
+import { DEFAULT_POLICY, effectiveLimits, validatePolicy, resolveTier, ENTITIES } from '../src/policy/policy.js';
+import { PolicyEnforcer } from '../src/policy/enforcer.js';
+import { MemoryUsageStore } from '../src/policy/usage-store.js';
+
+describe('policy limits', () => {
+  it('keeps every self-serve tier below 2% of each dataset and of all data', () => {
+    const grand = ENTITIES.reduce((s, e) => s + DEFAULT_POLICY.totals[e], 0);
+    for (const [tier, def] of Object.entries(DEFAULT_POLICY.tiers)) {
+      if (!def.selfServe) continue;
+      const l = effectiveLimits(DEFAULT_POLICY, tier);
+      for (const e of ENTITIES) expect(l.lifetime[e]).toBeLessThan(DEFAULT_POLICY.totals[e] * 0.02);
+      expect(l.lifetimeTotal).toBeLessThan(grand * 0.02);
+    }
+  });
+  it('caps ingredients at 4,000 for self-serve tiers even if a tier asks for more', () => {
+    const p = { ...DEFAULT_POLICY, tiers: { ...DEFAULT_POLICY.tiers, startup: { selfServe: true, requestsPerMinute: 60, lifetime: { ingredient: 999999 } } } };
+    expect(effectiveLimits(p, 'startup').lifetime.ingredient).toBe(4000);
+  });
+  it('clamps self-serve caps to the share ceiling', () => {
+    const p = { ...DEFAULT_POLICY, tiers: { ...DEFAULT_POLICY.tiers, startup: { selfServe: true, requestsPerMinute: 60, lifetime: { supplier: 100000 } } } };
+    expect(effectiveLimits(p, 'startup').lifetime.supplier).toBe(Math.floor(34388 * 0.019));
+  });
+  it('rejects a share ceiling at or above 2%', () => {
+    expect(() => validatePolicy({ ...DEFAULT_POLICY, maxSelfServeShare: 0.02 })).toThrow();
+  });
+  it('reads the tier from the account, maps plan aliases, and defaults unknown tiers to free', () => {
+    expect(resolveTier(DEFAULT_POLICY, 'pro')).toBe('startup');
+    expect(resolveTier(DEFAULT_POLICY, 'none')).toBe('free');
+    expect(resolveTier(DEFAULT_POLICY, 'platinum-hacker')).toBe('free');
+    expect(resolveTier(DEFAULT_POLICY, null)).toBe('free');
+  });
+  it('lets enterprise contracts carry account-specific limits', () => {
+    const l = effectiveLimits(DEFAULT_POLICY, 'enterprise', { supplier: 20000, requestsPerMinute: 900 });
+    expect(l.lifetime.supplier).toBe(20000);
+    expect(l.requestsPerMinute).toBe(900);
+  });
+  it('ignores contract overrides on self-serve tiers', () => {
+    expect(effectiveLimits(DEFAULT_POLICY, 'free', { supplier: 20000 }).lifetime.supplier).toBe(10);
+  });
+});
+
+describe('lifetime caps through the tools', () => {
+  it('hits the ingredient cap and returns the custom contract message', async () => {
+    const { call } = await connect({ account: account('free'), policy: smallPolicy() });
+    for (const id of ['i1', 'i2', 'i3']) expect((await call('get_ingredient', { ingredient_id: id })).isError).toBeFalsy();
+    const r = await call('get_ingredient', { ingredient_id: 'i4' });
+    expect(r.isError).toBe(true);
+    expect(r.json.error).toBe('cap_exceeded');
+    expect(r.json.message).toContain('journeyfoods.io');
+    expect(r.json.message).toContain('custom contract');
+    expect(r.json.message).toContain('Thank you');
+    expect(r.json.message.toLowerCase()).not.toContain('thanks');
+  });
+  it('still serves records the account already received after the cap', async () => {
+    const { call } = await connect({ account: account('free'), policy: smallPolicy() });
+    for (const id of ['i1', 'i2', 'i3']) await call('get_ingredient', { ingredient_id: id });
+    expect((await call('get_ingredient', { ingredient_id: 'i2' })).isError).toBeFalsy();
+  });
+  it('enforces the real 4,000 ingredient cap on the startup tier', async () => {
+    const data = new MockData(0, 4001);
+    const enforcer = new PolicyEnforcer(DEFAULT_POLICY, new MemoryUsageStore());
+    const acct = account('startup', 'acct:bulk');
+    const ids = [...data.ingredients.keys()];
+    await enforcer.admit(acct, 'ingredient', ids.slice(0, 3999), (x) => x);
+    const { call } = await connect({ account: acct, data, enforcer });
+    expect((await call('get_ingredient', { ingredient_id: ids[3999] })).isError).toBeFalsy();
+    const r = await call('get_ingredient', { ingredient_id: ids[4000] });
+    expect(r.json.error).toBe('cap_exceeded');
+    expect(r.json.message).toContain('4,000 ingredients');
+  });
+  it('withholds search results beyond the supplier cap with a notice, then refuses', async () => {
+    const { call } = await connect({ account: account('free'), policy: smallPolicy() });
+    const first = await call('search_suppliers', { query: 'pea', limit: 4 });
+    expect(first.structuredContent.returned).toBe(4);
+    const second = await call('search_suppliers', { query: 'pea', limit: 10 });
+    expect(second.structuredContent.returned).toBe(5); // 4 already seen + 1 new
+    expect(second.structuredContent.notice).toContain('journeyfoods.io');
+    const third = await call('get_supplier', { supplier_id: 's20' });
+    expect(third.json.error).toBe('cap_exceeded');
+  });
+  it('blocks compare_suppliers when the cap leaves fewer than two suppliers', async () => {
+    const { call } = await connect({ account: account('free'), policy: smallPolicy() });
+    await call('search_suppliers', { query: 'pea', limit: 5 });
+    const r = await call('compare_suppliers', { supplier_ids: ['s10', 's11'] });
+    expect(r.json.error).toBe('cap_exceeded');
+  });
+  it('caps price series and lab results', async () => {
+    const { call } = await connect({ account: account('free'), policy: smallPolicy() });
+    expect((await call('get_ingredient_price', { ingredient: 'cocoa' })).isError).toBeFalsy();
+    expect((await call('verify_lab_result', { subject: 'oats', result_id: 'r1' })).isError).toBeFalsy();
+    expect((await call('verify_lab_result', { subject: 'rice', result_id: 'r2' })).isError).toBeFalsy();
+    expect((await call('verify_lab_result', { subject: 'corn', result_id: 'r3' })).json.error).toBe('cap_exceeded');
+  });
+  it('enforces the cross-entity lifetime total', async () => {
+    const p = smallPolicy();
+    p.tiers.free.lifetimeTotal = 3;
+    const { call } = await connect({ account: account('free'), policy: p });
+    await call('search_suppliers', { query: 'pea', limit: 3 });
+    expect((await call('get_ingredient', { ingredient_id: 'i1' })).json.error).toBe('cap_exceeded');
+  });
+  it('keeps caps per account', async () => {
+    const enforcer = new PolicyEnforcer(smallPolicy(), new MemoryUsageStore());
+    const a = await connect({ account: account('free', 'acct:a'), enforcer });
+    const b = await connect({ account: account('free', 'acct:b'), enforcer });
+    for (const id of ['i1', 'i2', 'i3']) await a.call('get_ingredient', { ingredient_id: id });
+    expect((await a.call('get_ingredient', { ingredient_id: 'i4' })).isError).toBe(true);
+    expect((await b.call('get_ingredient', { ingredient_id: 'i4' })).isError).toBeFalsy();
+  });
+  it('does not overshoot the cap under concurrent calls', async () => {
+    const { call, enforcer } = await connect({ account: account('free', 'acct:race'), policy: smallPolicy() });
+    await Promise.all(['i1', 'i2', 'i3', 'i4', 'i5', 'i6'].map((id) => call('get_ingredient', { ingredient_id: id })));
+    const u = await enforcer.usage(account('free', 'acct:race'));
+    expect(u.used.ingredient).toBe(3);
+  });
+});
+
+describe('rate limits', () => {
+  it('limits requests per minute per account and recovers after the window', async () => {
+    let t = 1_000_000;
+    const p = smallPolicy();
+    p.tiers.free.requestsPerMinute = 3;
+    const { call } = await connect({ account: account('free'), policy: p, now: () => t });
+    for (let i = 0; i < 3; i++) expect((await call('get_supplier', { supplier_id: 's1' })).isError).toBeFalsy();
+    const r = await call('get_supplier', { supplier_id: 's1' });
+    expect(r.json.error).toBe('rate_limited');
+    expect(r.json.message).toContain('Thank you');
+    t += 61_000;
+    expect((await call('get_supplier', { supplier_id: 's1' })).isError).toBeFalsy();
+  });
+});

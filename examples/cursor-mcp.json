@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "journey": {
+      "url": "https://mcp.journeyfoods.io/mcp",
+      "headers": { "x-api-key": "YOUR_JOURNEY_API_KEY" }
+    }
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "name": "@journeyfoods/mcp",
+  "version": "0.2.0",
+  "description": "Journey AI MCP server: food and CPG supplier, ingredient and commodity price data for AI agents (Claude, ChatGPT, Cursor and other MCP clients).",
+  "type": "module",
+  "bin": {
+    "journey-mcp": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "policy.example.json",
+    "examples"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/cli.js",
+    "start": "node dist/cli.js --http",
+    "start:stdio": "node dist/cli.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "license": "MIT",
+  "author": "Journey Foods (https://journeyfoods.io)",
+  "homepage": "https://journeyfoods.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JourneyFoodsDev/journey-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JourneyFoodsDev/journey-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "food",
+    "cpg",
+    "supply-chain",
+    "ingredients",
+    "suppliers",
+    "commodity-prices",
+    "ai-agents",
+    "claude",
+    "chatgpt",
+    "cursor",
+    "journey-foods"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "private": false,
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "express": "^4.22.3",
+    "jose": "^6.2.12",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/node": "^20.19.43",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.3.1",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  },
+  "mcpName": "io.journeyfoods/journey-ai"
+}

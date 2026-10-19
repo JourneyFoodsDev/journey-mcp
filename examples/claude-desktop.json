@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "journey": {
+      "command": "npx",
+      "args": ["-y", "@journeyfoods/mcp"],
+      "env": { "JOURNEY_PRICE_API_KEY": "YOUR_JOURNEY_API_KEY" }
+    }
+  }
+}

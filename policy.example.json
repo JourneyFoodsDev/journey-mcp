@@ -1,0 +1,47 @@
+{
+  "totals": {
+    "product": 488009,
+    "supplier": 34388,
+    "ingredient": 500000,
+    "price_series": 750,
+    "lab_result": 10000
+  },
+  "maxSelfServeShare": 0.019,
+  "ingredientLifetimeCap": 4000,
+  "defaultTier": "free",
+  "aliases": {
+    "none": "free",
+    "trial": "free",
+    "basic": "free",
+    "pro": "startup",
+    "starter": "startup",
+    "custom": "enterprise"
+  },
+  "tiers": {
+    "free": {
+      "selfServe": true,
+      "requestsPerMinute": 10,
+      "lifetime": {
+        "product": 200,
+        "ingredient": 200,
+        "supplier": 10,
+        "lab_result": 25
+      },
+      "lifetimeGroups": [],
+      "upgradeMessage": "Upgrade to the Startup plan in the Journey developer portal at https://dev.journeyfoods.io for higher limits."
+    },
+    "startup": {
+      "selfServe": true,
+      "requestsPerMinute": 60,
+      "lifetime": {
+        "ingredient": 4000
+      }
+    },
+    "enterprise": {
+      "selfServe": false,
+      "requestsPerMinute": 300,
+      "lifetime": {}
+    }
+  },
+  "_comment": "Combined cap option: set tiers.free.lifetimeGroups to [{\"name\":\"products_and_ingredients\",\"entities\":[\"product\",\"ingredient\"],\"limit\":200}]."
+}

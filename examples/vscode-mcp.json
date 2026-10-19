@@ -1,0 +1,12 @@
+{
+  "inputs": [
+    { "type": "promptString", "id": "journey-key", "description": "Journey API key", "password": true }
+  ],
+  "servers": {
+    "journey": {
+      "type": "http",
+      "url": "https://mcp.journeyfoods.io/mcp",
+      "headers": { "x-api-key": "${input:journey-key}" }
+    }
+  }
+}
