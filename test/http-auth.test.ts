@@ -82,7 +82,7 @@ describe('introspection verifier', () => {
   const ocfg = { ...cfg.oauth, introspectionUrl: 'https://auth.example.test/introspect' };
   it('maps an active token to the account and tier', async () => {
     const v = new IntrospectionVerifier(ocfg, RESOURCE, fetchWith({ active: true, aud: RESOURCE, iss: ISSUER, sub: 'u', journey_account_id: 'c-1', journey_tier: 'enterprise', scope: 'journey:read' }));
-    expect(await v.verify('t')).toMatchObject({ id: 'acct:c-1', tier: 'enterprise', authMethod: 'oauth' });
+    expect(await v.verify('t')).toMatchObject({ id: 'acct:c-1', tier: 'enterprise', authMethod: 'oauth', companyId: 'c-1', userId: 'u' });
   });
   it('rejects inactive tokens and wrong audiences', async () => {
     await expect(new IntrospectionVerifier(ocfg, RESOURCE, fetchWith({ active: false })).verify('t')).rejects.toThrow(/not active/);
@@ -95,6 +95,28 @@ describe('api key resolver', () => {
     const f = (async () => new Response(JSON.stringify({ account_id: 'c-9', tier: 'pro' }), { status: 200 })) as unknown as typeof fetch;
     const a = await new ApiKeyResolver('https://lookup.example.test', silentLogger, f).resolve('k');
     expect(a).toMatchObject({ id: 'acct:c-9', tier: 'pro' });
+  });
+  it('uses the price-feed company id so a second key does not reset the account', async () => {
+    const calls: string[] = [];
+    const f = (async (input: URL | string) => {
+      calls.push(String(input));
+      const key = new URL(String(input)).searchParams.get('k');
+      return new Response(JSON.stringify({ data: { companyId: 'co-77', accountId: 'acct-9', userId: 'user-3', tier: 'growth', status: 'active' } }), { status: 200, headers: key ? {} : {} });
+    }) as unknown as typeof fetch;
+    const resolver = new ApiKeyResolver(undefined, silentLogger, f, 60_000, 'https://price.example.test');
+    const a = await resolver.resolve('price-key-1');
+    const b = await resolver.resolve('price-key-2');
+    expect(a).toMatchObject({ id: 'acct:co-77', companyId: 'co-77', userId: 'user-3', tier: 'growth', status: 'active' });
+    expect(b.id).toBe(a.id);
+    expect(a.id).not.toMatch(/^key:/);
+    expect(calls.every((u) => u.endsWith('/api/v1/account'))).toBe(true);
+  });
+  it('does not treat a key-status payload as a stable account id', async () => {
+    const f = (async () => new Response(JSON.stringify({ id: 'key_123', status: 'trialing', callLimit: 100, callsUsed: 1 }), { status: 200 })) as unknown as typeof fetch;
+    const a = await new ApiKeyResolver(undefined, silentLogger, f, 60_000, 'https://price.example.test').resolve('trial-key');
+    expect(a.id).toMatch(/^key:[0-9a-f]{16}$/);
+    expect(a.companyId).toBeUndefined();
+    expect(a.status).toBe('trialing');
   });
   it('falls back to the most restrictive tier when no lookup is configured', async () => {
     const a = await new ApiKeyResolver(undefined, silentLogger).resolve('k');

@@ -67,9 +67,10 @@ If a data source isn't connected for your account, the tool says "not connected"
 
 | Plan | What you can see | Requests |
 |---|---|---|
-| Free | 10 suppliers, 200 ingredients, 200 products and 25 lab results per account (distinct records, lifetime) | 10 per minute |
-| Startup | Higher limits (up to 4,000 ingredients) | 60 per minute |
-| Enterprise | Contract limits | 300 per minute |
+| Free (Explore) | 200 products, 200 ingredients, 10 suppliers and 25 lab results per company or account (distinct records, lifetime), each under 2% | 10 per minute |
+| Fresh | 2% of each data type. The supplier network is not included | 60 per minute |
+| Supplier, Growth, Group, Startup | 2% of each data type (suppliers, ingredients, products, lab results) | 60 per minute |
+| Enterprise | Uncapped while the subscription is active or trialing | 300 per minute |
 
 When you reach a limit, the tool tells you and links to upgrade options. For full data access, [contact Journey](https://journeyfoods.io/contact) about a contract.
 

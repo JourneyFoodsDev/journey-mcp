@@ -22,8 +22,10 @@ describe('free tier lifetime caps (200 products, 200 ingredients, 10 suppliers)'
     expect(l.lifetime.ingredient).toBe(200);
     expect(l.lifetime.supplier).toBe(10);
     const s = effectiveLimits(DEFAULT_POLICY, 'startup');
-    expect(s.lifetime.ingredient).toBe(4000);
+    expect(s.lifetime.ingredient).toBe(Math.floor(DEFAULT_POLICY.totals.ingredient * 0.02));
+    expect(s.lifetime.supplier).toBe(Math.floor(DEFAULT_POLICY.totals.supplier * 0.02));
     expect(s.upgradeMessage).toBeUndefined();
+    expect(effectiveLimits(DEFAULT_POLICY, 'free').lifetime.lab_result).toBe(25);
   });
 
   it('caps suppliers at 10 across search_suppliers, get_supplier and compare_suppliers', async () => {
@@ -96,12 +98,14 @@ describe('free tier lifetime caps (200 products, 200 ingredients, 10 suppliers)'
     expect(() => validatePolicy({ ...DEFAULT_POLICY, tiers: { ...DEFAULT_POLICY.tiers, free: { ...DEFAULT_POLICY.tiers.free, lifetimeGroups: [{ name: 'x', entities: ['nope' as any], limit: 1 }] } } })).toThrow();
   });
 
-  it('paid tiers keep the contract-only message (no upgrade line) and the 4,000 ingredient cap', async () => {
+  it('paid tiers keep the contract-only message and the 2% ingredient ceiling', async () => {
     const enforcer = new PolicyEnforcer(DEFAULT_POLICY, new MemoryUsageStore());
     const a = account('startup', 'acct:paid');
-    await enforcer.admit(a, 'ingredient', Array.from({ length: 4000 }, (_, i) => `i${i}`), (x) => x);
+    const cap = effectiveLimits(DEFAULT_POLICY, 'startup').lifetime.ingredient;
+    expect(cap).toBe(10_000);
+    await enforcer.admit(a, 'ingredient', Array.from({ length: cap }, (_, i) => `i${i}`), (x) => x);
     const err = await enforcer.admit(a, 'ingredient', ['extra'], (x) => x).catch((e) => e);
-    expect(err.message).toContain('4,000 ingredients');
+    expect(err.message).toContain('10,000 ingredients');
     expect(err.message).toContain('https://journeyfoods.io/contact');
     expect(err.message).not.toContain('Upgrade');
   });

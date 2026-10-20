@@ -23,7 +23,7 @@ export interface Logger {
 }
 
 /** JSON lines to stderr (stdout is reserved for the stdio MCP transport). Secret-looking fields are redacted. */
-export function createLogger(level: Level = (process.env.LOG_LEVEL as Level) || 'info', sink = (line: string) => process.stderr.write(line + '\n')): Logger {
+export function createLogger(level: Level = (process.env.LOG_LEVEL as Level) || 'info', sink: (line: string) => void = (line) => { process.stderr.write(line + '\n'); }): Logger {
   const min = ORDER[level] ?? ORDER.info;
   const emit = (l: Level, msg: string, fields?: Record<string, unknown>) => {
     if (ORDER[l] < min) return;

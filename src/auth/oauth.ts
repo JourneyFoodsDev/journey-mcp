@@ -20,14 +20,27 @@ function scopesOf(p: Record<string, unknown>): string[] {
   return typeof s === 'string' ? s.split(' ').filter(Boolean) : [];
 }
 
+function claim(p: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = p[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
 function toAccount(p: Record<string, unknown>, cfg: JourneyConfig['oauth']): Account {
-  const id = (p[cfg.accountClaim] ?? p.sub) as string | undefined;
+  const userId = claim(p, [cfg.userClaim, 'journey_user_id', 'user_id', 'sub']);
+  const companyId = claim(p, [cfg.companyClaim, 'journey_company_id', 'company_id', cfg.accountClaim]);
+  const id = companyId ?? userId ?? claim(p, [cfg.accountClaim, 'sub']);
   if (!id) throw new AuthError('Access token has no Journey account.');
   const scopes = scopesOf(p);
   if (cfg.requiredScope && !scopes.includes(cfg.requiredScope)) throw new AuthError(`Access token is missing the ${cfg.requiredScope} scope.`, 'insufficient_scope');
-  const tier = (p[cfg.tierClaim] as string | undefined) ?? null;
+  const tier = claim(p, [cfg.tierClaim]) ?? null;
+  const status = claim(p, [cfg.statusClaim, 'journey_status', 'subscription_status', 'status']) ?? null;
+  const role = claim(p, [cfg.roleClaim, 'journey_role', 'role']) ?? null;
   const limits = p.journey_limits as Account['contractLimits'] | undefined;
-  return { id: `acct:${id}`, tier, authMethod: 'oauth', scopes, contractLimits: limits };
+  // The company owns the allowance. The user is still forwarded so the backend can attribute the call.
+  return { id: `acct:${companyId ?? id}`, tier, status, role, userId, companyId, authMethod: 'oauth', scopes, contractLimits: limits };
 }
 
 export class JwtVerifier implements TokenVerifier {

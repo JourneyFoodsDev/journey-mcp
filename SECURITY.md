@@ -9,4 +9,4 @@ Please report security issues privately through GitHub's **Report a vulnerabilit
 - Every tool is read-only.
 - Keys come only from the environment or the request header. They are never logged, stored or returned, and each key is only sent to the service that issued it.
 - Usage events record the account, tool, counts, client and latency. They never record arguments or returned data.
-- Per-account caps and rate limits are enforced on the server, not by the client.
+- Caps and rate limits belong to the company or account, not to an API key, and are enforced on the server, not by the client.
