@@ -23,7 +23,7 @@ export function buildRuntime(cfg: JourneyConfig = loadConfig(), log: Logger = cr
     policy,
     data: new RestJourneyData(cfg, log),
     enforcer: new PolicyEnforcer(policy, store),
-    keys: new ApiKeyResolver(cfg.keyLookupUrl, log),
+    keys: new ApiKeyResolver(cfg.keyLookupUrl, log, (input, init) => fetch(input, init), 5 * 60_000, cfg.priceAccountBaseUrl),
     verifier: createTokenVerifier(cfg),
     usage: sinks.length ? new MultiUsageSink(sinks) : undefined,
   };

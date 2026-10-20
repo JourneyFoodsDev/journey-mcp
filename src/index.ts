@@ -11,4 +11,5 @@ export * from './policy/usage-store.js';
 export * from './auth/account.js';
 export * from './auth/oauth.js';
 export * from './auth/api-key.js';
+export * from './auth/end-user.js';
 export * from './telemetry/usage-events.js';

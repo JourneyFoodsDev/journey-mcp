@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { EndUserClaims } from '../auth/end-user.js';
 
 export const SupplierSchema = z.object({
   id: z.string(),
@@ -137,6 +138,8 @@ export interface Credential {
   apiKey?: string;
   /** Journey app session for the signed-in user. Only set by the remote OAuth server. Never logged. */
   appToken?: string;
+  /** Signed onto x-journey-end-user for supplier, ingredient, product and lab calls. */
+  endUser?: EndUserClaims;
 }
 
 /** Data adapter: the only layer that knows Journey's REST endpoints. Swap or extend it without touching tools. */

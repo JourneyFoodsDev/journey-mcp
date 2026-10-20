@@ -1,0 +1,29 @@
+{
+  // Hosted Journey AI MCP Worker (mcp.journeyfoods.io).
+  // A deploy from this file replaces the Worker's bindings. Main did not have this
+  // file; the live Worker was deployed from a local branch that bound the supplier
+  // service key. Keep that binding so a deploy does not drop it.
+  // Confirm the Worker name matches production before deploying. Do not deploy from CI.
+  "name": "journey-mcp",
+  "main": "index.ts",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true
+    }
+  },
+  "secrets_store_secrets": [
+    {
+      "binding": "JOURNEY_SUPPLIER_API_KEY",
+      "store_id": "default_secrets_store",
+      "secret_name": "JOURNEY_SUPPLIER_KEY_MCP"
+    },
+    {
+      "binding": "JOURNEY_END_USER_SIGNING_SECRET",
+      "store_id": "default_secrets_store",
+      "secret_name": "JOURNEY_END_USER_SIGNING_SECRET"
+    }
+  ]
+}

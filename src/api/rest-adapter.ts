@@ -1,6 +1,7 @@
 import { NotConnectedError, UpstreamError } from '../errors.js';
 import type { JourneyConfig } from '../config.js';
 import type { Logger } from '../logger.js';
+import { signEndUser } from '../auth/end-user.js';
 import { JourneyHttpClient, unwrap } from './client.js';
 import type { Credential, Ingredient, JourneyData, LabLookupOptions, LabResult, Price, PriceForecast, PriceSeriesSummary, Product, ProductQuery, ProductSummary, Supplier, SupplierQuery } from './types.js';
 
@@ -117,11 +118,21 @@ export class RestJourneyData implements JourneyData {
   }
   readonly app: JourneyHttpClient;
 
-  async searchSuppliers(q: SupplierQuery, _cred: Credential): Promise<Supplier[]> {
+  /** End-user headers for one backend call. Empty when the signing secret or the identity is missing. */
+  private endUserHeaders(cred: Credential, extra?: Record<string, string>): Record<string, string> {
+    return { ...extra, ...signEndUser(cred.endUser ?? {}, this.cfg.endUserSigningSecret) };
+  }
+
+  private supplierHeaders(cred: Credential): Record<string, string> {
+    return this.endUserHeaders(cred, this.cfg.supplierServiceKey ? { 'x-journey-service-key': this.cfg.supplierServiceKey } : undefined);
+  }
+
+  async searchSuppliers(q: SupplierQuery, cred: Credential): Promise<Supplier[]> {
     // Filters run server side (GET /api/v1/supplier/profiles with ingredient/category/region/certification).
     // The client-side filter below stays as a guard for API versions that ignore them.
     const payload = await this.suppliers.request(ENDPOINTS.supplierList, {
       query: { search: q.query, ingredient: q.ingredient, category: q.category, region: q.region, certification: q.certification, pageSize: q.limit, page: q.page },
+      headers: this.supplierHeaders(cred),
     });
     rejectSeeded(payload, ENDPOINTS.supplierList);
     const rows = unwrap(payload);
@@ -135,8 +146,8 @@ export class RestJourneyData implements JourneyData {
       .slice(0, q.limit);
   }
 
-  async getSupplier(id: string, _cred: Credential): Promise<Supplier | null> {
-    const payload = await this.suppliers.request(ENDPOINTS.supplierBySlug(id));
+  async getSupplier(id: string, cred: Credential): Promise<Supplier | null> {
+    const payload = await this.suppliers.request(ENDPOINTS.supplierBySlug(id), { headers: this.supplierHeaders(cred) });
     if (!payload) return null;
     const row = unwrap(payload);
     if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
@@ -145,21 +156,22 @@ export class RestJourneyData implements JourneyData {
   }
 
   async searchIngredients(q: string, limit: number, cred: Credential): Promise<Ingredient[]> {
-    const payload = await this.dev.request(ENDPOINTS.ingredientSearch, { query: { q }, apiKey: cred.apiKey });
+    const payload = await this.dev.request(ENDPOINTS.ingredientSearch, { query: { q }, apiKey: cred.apiKey, headers: this.endUserHeaders(cred) });
     const rows = unwrap(payload);
     if (!Array.isArray(rows)) throw new UpstreamError('Ingredient search returned an unexpected shape.', 502, ENDPOINTS.ingredientSearch);
     return rows.slice(0, limit).map((r) => normalizeIngredient(r as Record<string, unknown>));
   }
 
   async getIngredient(id: string, cred: Credential): Promise<Ingredient | null> {
-    const payload = await this.dev.request(ENDPOINTS.ingredientById(id), { apiKey: cred.apiKey });
+    const headers = this.endUserHeaders(cred);
+    const payload = await this.dev.request(ENDPOINTS.ingredientById(id), { apiKey: cred.apiKey, headers });
     if (!payload) return null;
     const row = unwrap(payload) as Record<string, unknown>;
     const base = normalizeIngredient(row);
     // Optional enrichments. Plan-gated upstream; a failure here does not fail the profile.
     const [nut, all] = await Promise.allSettled([
-      this.dev.request(ENDPOINTS.nutrientsById(id), { apiKey: cred.apiKey }),
-      this.dev.request(ENDPOINTS.allergensById(id), { apiKey: cred.apiKey }),
+      this.dev.request(ENDPOINTS.nutrientsById(id), { apiKey: cred.apiKey, headers }),
+      this.dev.request(ENDPOINTS.allergensById(id), { apiKey: cred.apiKey, headers }),
     ]);
     if (nut.status === 'fulfilled' && nut.value) {
       const n = unwrap(nut.value) as Record<string, unknown>;
@@ -216,10 +228,10 @@ export class RestJourneyData implements JourneyData {
    * The summary counts only results Journey staff marked verified. PDF links are for paid tiers only,
    * through a service-key endpoint that returns a 15-minute signed URL.
    */
-  async verifyLabResult(subject: string, resultId: string | undefined, _cred: Credential, opts: LabLookupOptions = {}): Promise<LabResult> {
+  async verifyLabResult(subject: string, resultId: string | undefined, cred: Credential, opts: LabLookupOptions = {}): Promise<LabResult> {
     if (!this.cfg.labsVerifyPath) throw new NotConnectedError('Journey Labs verification lookup');
     const subjectType = opts.subjectType ?? 'ingredient';
-    const payload = await this.labs.request(this.cfg.labsVerifyPath, { query: { subjectType, subjectId: subject } });
+    const payload = await this.labs.request(this.cfg.labsVerifyPath, { query: { subjectType, subjectId: subject }, headers: this.endUserHeaders(cred) });
     // Unwrap only the { data } envelope: the generic unwrap would descend into `results`.
     const body = (payload ?? {}) as Record<string, unknown>;
     const r = ((body.data && typeof body.data === 'object' ? body.data : body) ?? {}) as Record<string, unknown>;
@@ -243,7 +255,7 @@ export class RestJourneyData implements JourneyData {
     if (hit?.hasPdf && opts.includePdf && this.cfg.labsServiceKey) {
       try {
         const link = unwrap(await this.labs.request(`/api/v1/lab-results/${encodeURIComponent(String(hit.id))}/pdf`, {
-          headers: { 'x-journey-service-key': this.cfg.labsServiceKey },
+          headers: this.endUserHeaders(cred, { 'x-journey-service-key': this.cfg.labsServiceKey }),
         })) as Record<string, unknown> | null;
         out.pdf_url = str(link?.url);
       } catch {
@@ -301,7 +313,7 @@ export class RestJourneyData implements JourneyData {
 
   async searchProducts(q: ProductQuery, cred: Credential): Promise<{ products: ProductSummary[]; total: number | null }> {
     const bearer = this.requireSession(cred);
-    const payload = (await this.app.request(ENDPOINTS.productList, { query: { search: q.query, page: q.page, limit: q.limit, status: q.status }, bearer })) as Record<string, unknown> | null;
+    const payload = (await this.app.request(ENDPOINTS.productList, { query: { search: q.query, page: q.page, limit: q.limit, status: q.status }, bearer, headers: this.endUserHeaders(cred) })) as Record<string, unknown> | null;
     const inner = payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data) ? (payload.data as Record<string, unknown>) : payload;
     const rows = unwrap(inner);
     if (!Array.isArray(rows)) throw new UpstreamError('Product list returned an unexpected shape.', 502, ENDPOINTS.productList);
@@ -311,7 +323,7 @@ export class RestJourneyData implements JourneyData {
   async getProduct(id: string, cred: Credential): Promise<Product | null> {
     const bearer = this.requireSession(cred);
     const endpoint = ENDPOINTS.productDetail(id);
-    const payload = await this.app.request(endpoint, { bearer });
+    const payload = await this.app.request(endpoint, { bearer, headers: this.endUserHeaders(cred) });
     if (!payload) return null;
     const row = unwrap(payload);
     if (!row || typeof row !== 'object' || Array.isArray(row)) return null;

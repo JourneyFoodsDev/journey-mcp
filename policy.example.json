@@ -6,8 +6,7 @@
     "price_series": 750,
     "lab_result": 10000
   },
-  "maxSelfServeShare": 0.019,
-  "ingredientLifetimeCap": 4000,
+  "maxSelfServeShare": 0.02,
   "defaultTier": "free",
   "aliases": {
     "none": "free",
@@ -15,7 +14,19 @@
     "basic": "free",
     "pro": "startup",
     "starter": "startup",
-    "custom": "enterprise"
+    "custom": "enterprise",
+    "explore": "free",
+    "free_trial": "free",
+    "supplier": "startup",
+    "growth": "startup",
+    "group": "startup",
+    "app:explore": "free",
+    "app:free_trial": "free",
+    "app:supplier": "startup",
+    "app:fresh": "fresh",
+    "app:growth": "startup",
+    "app:group": "startup",
+    "app:enterprise": "enterprise"
   },
   "tiers": {
     "free": {
@@ -30,12 +41,17 @@
       "lifetimeGroups": [],
       "upgradeMessage": "Upgrade to the Startup plan in the Journey developer portal at https://dev.journeyfoods.io for higher limits."
     },
-    "startup": {
+    "fresh": {
       "selfServe": true,
       "requestsPerMinute": 60,
       "lifetime": {
-        "ingredient": 4000
+        "supplier": 0
       }
+    },
+    "startup": {
+      "selfServe": true,
+      "requestsPerMinute": 60,
+      "lifetime": {}
     },
     "enterprise": {
       "selfServe": false,

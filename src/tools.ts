@@ -5,6 +5,7 @@ import { JourneyError, NotConnectedError } from './errors.js';
 import { capNotice, type Enforcer } from './policy/enforcer.js';
 import type { Logger } from './logger.js';
 import type { Account } from './auth/account.js';
+import { backendPlan } from './auth/end-user.js';
 import type { Entity } from './policy/policy.js';
 import { classifyClient, type UsageEvent, type UsageSink } from './telemetry/usage-events.js';
 import {
@@ -162,7 +163,17 @@ function need(ctx: ToolContext, feature: keyof typeof FEATURE_LABEL) {
   if (ctx.data.available && !ctx.data.available(feature, cred(ctx))) throw new NotConnectedError(FEATURE_LABEL[feature]);
 }
 
-const cred = (ctx: ToolContext): { apiKey?: string; appToken?: string } => ({ apiKey: ctx.account.upstreamApiKey, appToken: ctx.account.appToken });
+const cred = (ctx: ToolContext): { apiKey?: string; appToken?: string; endUser?: { userId?: string; companyId?: string; tier?: string; status?: string; role?: string } } => ({
+  apiKey: ctx.account.upstreamApiKey,
+  appToken: ctx.account.appToken,
+  endUser: {
+    userId: ctx.account.userId,
+    companyId: ctx.account.companyId,
+    tier: backendPlan(ctx.account.tier),
+    status: ctx.account.status ?? undefined,
+    role: ctx.account.role ?? undefined,
+  },
+});
 
 export function registerTools(server: McpServer, ctx: ToolContext) {
   server.registerTool(

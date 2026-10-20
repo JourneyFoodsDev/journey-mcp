@@ -36,7 +36,7 @@ export class PolicyEnforcer implements Enforcer {
   ) {}
 
   limitsFor(account: Account): EffectiveLimits {
-    return effectiveLimits(this.policy, account.tier, account.contractLimits);
+    return effectiveLimits(this.policy, account.tier, account.contractLimits, account.status);
   }
 
   /** Sliding one-minute window. Throws RateLimitError when the account is over its tier's limit. */
@@ -141,8 +141,11 @@ export class PolicyEnforcer implements Enforcer {
   }
 
   private capError(entity: Entity, limits: EffectiveLimits) {
-    const n = limits.lifetime[entity].toLocaleString('en-US');
     const label: Record<Entity, string> = { product: 'products', supplier: 'suppliers', ingredient: 'ingredients', price_series: 'price series', lab_result: 'lab results' };
+    if (entity === 'supplier' && limits.lifetime.supplier === 0) {
+      return new CapExceededError('lifetime_supplier', 'This plan does not include the Journey supplier network.', limits.upgradeMessage);
+    }
+    const n = limits.lifetime[entity].toLocaleString('en-US');
     return new CapExceededError(`lifetime_${entity}`, `This account has reached its lifetime limit of ${n} ${label[entity]}.`, limits.upgradeMessage);
   }
 

@@ -1,7 +1,9 @@
+import { createHmac } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import { RestJourneyData } from '../src/api/rest-adapter.js';
 import { loadConfig } from '../src/config.js';
 import { silentLogger } from '../src/logger.js';
+import { END_USER_HEADER, END_USER_SIG_HEADER } from '../src/auth/end-user.js';
 
 type Seen = { url: URL; headers: Record<string, string> };
 function mockFetch(routes: Record<string, unknown>, seen: Seen[] = []) {
@@ -106,6 +108,63 @@ describe('RestJourneyData', () => {
     const paid = await d.verifyLabResult('ing-1', undefined, {}, { includePdf: true });
     expect(paid.pdf_url).toBe('https://storage.example.test/signed');
     expect(seen.at(-1)!.headers['x-journey-service-key']).toBe('svc-not-real');
+  });
+
+  it('signs the end user on supplier, ingredient, product and lab calls, and skips the headers when the secret is missing', async () => {
+    const seen: Seen[] = [];
+    const secret = 'test-signing-secret';
+    const endUser = { userId: 'user-1', companyId: 'co-1', tier: 'Enterprise', status: 'Active', role: 'admin' };
+    const d = new RestJourneyData(loadConfig({
+      ...env,
+      JOURNEY_SUPPLIER_API_KEY: 'supplier-service-key',
+      JOURNEY_END_USER_SIGNING_SECRET: secret,
+      JOURNEY_LABS_VERIFY_PATH: '/api/v1/lab-results/verify',
+      JOURNEY_LABS_SERVICE_KEY: 'svc-not-real',
+    }), silentLogger, mockFetch({
+      'app.example.test/api/v1/supplier/profiles': { data: { mongo: true, data: [{ slug: 'acme', displayName: 'Acme', ingredients: ['oat'] }] } },
+      'app.example.test/api/v1/supplier/profiles/acme': { data: { slug: 'acme', displayName: 'Acme' } },
+      'dev.example.test/ingredients/search': [{ id: 'm1', name: 'Mango' }],
+      'dev.example.test/ingredients/m1': { id: 'm1', name: 'Mango' },
+      'dev.example.test/nutrients/m1': { id: 'm1' },
+      'dev.example.test/allergens/m1': { allergens_flat: [] },
+      'app.example.test/api/v1/product/product-list': { data: { data: [{ _id: 'a'.repeat(24), name: 'Bar' }], total: 1 } },
+      ['app.example.test/api/v1/product/product-detail/' + 'a'.repeat(24)]: { data: { name: 'Bar' } },
+      'app.example.test/api/v1/lab-results/verify': { data: { subject: { name: 'Oat' }, verified: true, status: 'verified', results: [{ id: 'r1', test: 'Gluten', hasPdf: true }] } },
+      'app.example.test/api/v1/lab-results/r1/pdf': { data: { url: 'https://storage.example.test/signed' } },
+      'price.example.test/api/v1/commodities': { data: [{ symbol: 'COCOA', name: 'Cocoa' }] },
+    }, seen));
+    await d.searchSuppliers({ query: 'acme', limit: 5 }, { endUser });
+    await d.getSupplier('acme', { endUser });
+    await d.searchIngredients('mango', 1, { apiKey: 'caller-key', endUser });
+    await d.getIngredient('m1', { apiKey: 'caller-key', endUser });
+    await d.searchProducts({ page: 1, limit: 5 }, { appToken: 'tok', endUser });
+    await d.getProduct('a'.repeat(24), { appToken: 'tok', endUser });
+    await d.verifyLabResult('ing-1', undefined, { endUser }, { includePdf: true });
+    await d.listPriceSeries({});
+    const signed = seen.filter((s) => !s.url.pathname.startsWith('/api/v1/commodities'));
+    expect(signed.length).toBeGreaterThan(0);
+    for (const s of signed) {
+      const header = s.headers[END_USER_HEADER];
+      expect(header).toBeTruthy();
+      expect(s.headers[END_USER_SIG_HEADER]).toBe(createHmac('sha256', secret).update(header).digest('hex'));
+      const body = JSON.parse(Buffer.from(header, 'base64url').toString('utf8'));
+      expect(body).toMatchObject({ userId: 'user-1', companyId: 'co-1', tier: 'enterprise', status: 'active', role: 'admin' });
+      expect(body.exp - body.iat).toBe(300);
+    }
+    const supplier = seen.find((s) => s.url.pathname === '/api/v1/supplier/profiles')!;
+    expect(supplier.headers['x-journey-service-key']).toBe('supplier-service-key');
+    expect(supplier.headers['x-api-key']).toBeUndefined();
+    const ingredient = seen.find((s) => s.url.pathname === '/ingredients/search')!;
+    expect(ingredient.headers['x-api-key']).toBe('caller-key');
+    const price = seen.find((s) => s.url.pathname === '/api/v1/commodities')!;
+    expect(price.headers[END_USER_HEADER]).toBeUndefined();
+    const unsigned = new RestJourneyData(loadConfig(env), silentLogger, mockFetch({
+      'app.example.test/api/v1/supplier/profiles': { data: { mongo: true, data: [{ slug: 'acme', displayName: 'Acme', ingredients: ['oat'] }] } },
+    }, seen));
+    const before = seen.length;
+    await unsigned.searchSuppliers({ query: 'acme', limit: 1 }, { endUser });
+    expect(seen[before].headers[END_USER_HEADER]).toBeUndefined();
+    expect(seen[before].headers['x-journey-service-key']).toBeUndefined();
   });
 
   it('reports revoked when the only result was revoked', async () => {
