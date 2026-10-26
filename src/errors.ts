@@ -45,9 +45,9 @@ export class UpstreamError extends JourneyError {
 }
 
 export class NotConnectedError extends JourneyError {
-  constructor(feature: string) {
+  constructor(feature: string, detail?: string) {
     super(
-      `${feature} is not connected on this Journey MCP server yet. No data was returned.`,
+      detail ?? `${feature} is not connected on this Journey MCP server yet. No data was returned.`,
       'not_connected',
       501,
     );

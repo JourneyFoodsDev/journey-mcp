@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
+import { JourneyHttpClient } from '../src/api/client.js';
 import { RestJourneyData } from '../src/api/rest-adapter.js';
 import { loadConfig } from '../src/config.js';
 import { silentLogger } from '../src/logger.js';
@@ -174,9 +175,16 @@ describe('RestJourneyData', () => {
     expect(await d.verifyLabResult('p', undefined, {}, { subjectType: 'product' })).toMatchObject({ verified: false, status: 'revoked', subject: 'p' });
   });
 
-  it('fails clearly when no base URL is configured', async () => {
-    const d = new RestJourneyData(loadConfig({}), silentLogger, mockFetch({}));
-    await expect(d.searchIngredients('x', 1, {})).rejects.toThrow(/not configured/);
+  it('calls the default developer API when no base URL is set, and still refuses an unconfigured client', async () => {
+    const seen: Seen[] = [];
+    const d = new RestJourneyData(loadConfig({ JOURNEY_API_KEY: 'dev-key' }), silentLogger, mockFetch({
+      'devapi.journeyfoods.io/ingredients/search': [{ id: 'o1', name: 'Oat' }],
+    }, seen));
+    expect((await d.searchIngredients('oat', 1, {})).map((r) => r.id)).toEqual(['o1']);
+    expect(seen[0].url.origin).toBe('https://devapi.journeyfoods.io');
+    expect(seen[0].headers['x-api-key']).toBe('dev-key');
+    const bare = new JourneyHttpClient(undefined, undefined, silentLogger, mockFetch({}));
+    await expect(bare.request('/x')).rejects.toThrow(/not configured/);
   });
 
   it('sends supplier filters server side and pages', async () => {

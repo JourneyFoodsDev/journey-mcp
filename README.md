@@ -18,7 +18,7 @@ You can use the hosted server (nothing to install) or run the package locally wi
 
 ### Claude (claude.ai and Claude Desktop)
 - **Hosted:** Settings → Connectors → Add custom connector. Use the URL `https://mcp.journeyfoods.io/mcp` and send your key in the `x-api-key` header.
-- **Local (Claude Desktop):** add [`examples/claude-desktop.json`](examples/claude-desktop.json) to `claude_desktop_config.json`, then restart Claude.
+- **Local (Claude Desktop):** add [`examples/claude-desktop.json`](examples/claude-desktop.json) to `claude_desktop_config.json`, then restart Claude. That block sets `JOURNEY_PRICE_API_KEY` (price tools; base `https://price.journeyfoods.io`). Add `JOURNEY_API_KEY` from [dev.journeyfoods.io](https://dev.journeyfoods.io) in the same `env` object for ingredient tools (base `https://devapi.journeyfoods.io`). Supplier tools use the hosted server unless you set `JOURNEY_SUPPLIER_API_BASE_URL`.
 
 ### Claude Code
 ```bash
@@ -38,13 +38,21 @@ Add [`examples/vscode-mcp.json`](examples/vscode-mcp.json) to `.vscode/mcp.json`
 Plugins → Add custom → Connector → Add MCP connector → Remote. Use the URL `https://mcp.journeyfoods.io/mcp`, choose API key authentication, and paste your key.
 
 ### Windsurf, Cline, Zed and other MCP clients
-Point any client that supports Streamable HTTP at `https://mcp.journeyfoods.io/mcp` with the `x-api-key` header (see [`examples/remote-generic.json`](examples/remote-generic.json)). For stdio clients, run `npx -y @journeyfoods/mcp` with `JOURNEY_PRICE_API_KEY` (and optionally `JOURNEY_API_KEY`) set.
+Point any client that supports Streamable HTTP at `https://mcp.journeyfoods.io/mcp` with the `x-api-key` header (see [`examples/remote-generic.json`](examples/remote-generic.json)). For stdio clients, run `npx -y @journeyfoods/mcp` with `JOURNEY_PRICE_API_KEY` set. Add `JOURNEY_API_KEY` for ingredient tools. Those are different keys.
 
 ### Local HTTP server
 ```bash
+# Price tools. Base defaults to https://price.journeyfoods.io
 JOURNEY_PRICE_API_KEY=... npx -y @journeyfoods/mcp --http   # serves http://127.0.0.1:3000/mcp
+
+# Ingredient tools also need a developer API key. Base defaults to https://devapi.journeyfoods.io
+# The price feed key is not sent to the developer API.
+JOURNEY_PRICE_API_KEY=... JOURNEY_API_KEY=... npx -y @journeyfoods/mcp
+
 npx -y @journeyfoods/mcp --help
 ```
+
+`JOURNEY_PRICE_API_BASE_URL` and `JOURNEY_API_BASE_URL` override those defaults. Supplier search is not on either API. Without `JOURNEY_SUPPLIER_API_BASE_URL`, supplier tools point you at the hosted server `https://mcp.journeyfoods.io/mcp`.
 
 ## Tools
 
@@ -61,7 +69,7 @@ npx -y @journeyfoods/mcp --help
 | `get_product` | One of your products: summary, ingredients and nutrition panel |
 | `verify_lab_result` | Check whether an ingredient, product or supplier has a Journey Labs verified result |
 
-If a data source isn't connected for your account, the tool says "not connected" instead of guessing.
+If a data source needs something this process does not have, the tool says what to set. Ingredient tools without `JOURNEY_API_KEY` link to [dev.journeyfoods.io](https://dev.journeyfoods.io). Price tools without `JOURNEY_PRICE_API_KEY` link to [price.journeyfoods.io](https://price.journeyfoods.io). Supplier tools without a supplier API base point at `https://mcp.journeyfoods.io/mcp`. Product tools need a signed-in Journey app account.
 
 ## Limits
 
@@ -76,7 +84,7 @@ When you reach a limit, the tool tells you and links to upgrade options. For ful
 
 ## Configuration
 
-See [`.env.example`](.env.example). Every value comes from the environment, and no keys are stored in code. Each key is only sent to the service that issued it. The policy file format is shown in [`policy.example.json`](policy.example.json).
+See [`.env.example`](.env.example). Keys come from the environment, and no keys are stored in code. Each key is only sent to the service that issued it. The price base defaults to `https://price.journeyfoods.io` and the developer base defaults to `https://devapi.journeyfoods.io`. The policy file format is shown in [`policy.example.json`](policy.example.json).
 
 ## Development
 

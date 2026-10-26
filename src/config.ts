@@ -44,32 +44,53 @@ export interface JourneyConfig {
 }
 
 const blank = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
+const strip = (v: string | undefined) => blank(v)?.replace(/\/+$/, '');
 
-/** Base URLs and keys come only from the environment. Nothing secret is hardcoded. */
+/**
+ * Public production bases. These are not secrets.
+ * The developer API (ingredients) and the price feed issue different keys and do not accept each other's.
+ * Confirmed in this repo (a key is never forwarded to a different base) and in the developer OpenAPI,
+ * which requires a Developer API Key from https://dev.journeyfoods.io and publishes no price or supplier routes.
+ */
+export const DEFAULT_DEV_API_BASE_URL = 'https://devapi.journeyfoods.io';
+export const DEFAULT_PRICE_API_BASE_URL = 'https://price.journeyfoods.io';
+/** Hosted Streamable HTTP server from the README. Supplier profiles are served here, not by a public REST route. */
+export const HOSTED_MCP_URL = 'https://mcp.journeyfoods.io/mcp';
+export const DEV_API_KEY_URL = 'https://dev.journeyfoods.io';
+export const PRICE_API_KEY_URL = 'https://price.journeyfoods.io';
+
+/** Public base URLs have defaults. Keys come only from the environment; nothing secret is hardcoded. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): JourneyConfig {
-  const apiBaseUrl = blank(env.JOURNEY_API_BASE_URL)?.replace(/\/+$/, '');
+  const explicitApiBase = strip(env.JOURNEY_API_BASE_URL);
+  const explicitSupplierBase = strip(env.JOURNEY_SUPPLIER_API_BASE_URL);
+  const explicitPriceBase = strip(env.JOURNEY_PRICE_API_BASE_URL);
+  const apiBaseUrl = explicitApiBase ?? DEFAULT_DEV_API_BASE_URL;
+  const priceApiBaseUrl = explicitPriceBase ?? DEFAULT_PRICE_API_BASE_URL;
+  // Supplier profiles are GET /api/v1/supplier/profiles on the Journey app API.
+  // Neither devapi.journeyfoods.io nor the price feed publishes that route.
+  // An explicit JOURNEY_API_BASE_URL other than the developer default is still reused,
+  // for deployments that serve ingredients and suppliers from one origin.
+  const supplierFromSharedOrigin = explicitApiBase && explicitApiBase !== DEFAULT_DEV_API_BASE_URL ? explicitApiBase : undefined;
+  const supplierApiBaseUrl = explicitSupplierBase ?? supplierFromSharedOrigin;
   const port = Number(env.PORT || 3000);
   const apiKey = blank(env.JOURNEY_API_KEY);
-  const supplierApiBaseUrl = blank(env.JOURNEY_SUPPLIER_API_BASE_URL)?.replace(/\/+$/, '') ?? apiBaseUrl;
-  const explicitPriceBase = blank(env.JOURNEY_PRICE_API_BASE_URL)?.replace(/\/+$/, '');
-  const priceApiBaseUrl = explicitPriceBase ?? apiBaseUrl;
   const supplierServiceKey = blank(env.JOURNEY_SUPPLIER_API_KEY);
   return {
     apiBaseUrl,
     apiKey,
     supplierApiBaseUrl,
-    appApiBaseUrl: blank(env.JOURNEY_APP_API_BASE_URL)?.replace(/\/+$/, '') ?? supplierApiBaseUrl,
+    appApiBaseUrl: strip(env.JOURNEY_APP_API_BASE_URL) ?? supplierApiBaseUrl,
     priceApiBaseUrl,
-    // A key is only sent to the service it belongs to: never forward the main key to a different base URL.
+    // A key is only sent to the service that issued it. The price feed key is not a developer API key.
     priceApiKey: blank(env.JOURNEY_PRICE_API_KEY) ?? (priceApiBaseUrl === apiBaseUrl ? apiKey : undefined),
-    // The supplier service key is x-journey-service-key. Only reuse the caller key as x-api-key when it is the same service.
+    // The supplier service key is x-journey-service-key. Only reuse the developer key as x-api-key on the same origin.
     supplierServiceKey,
     supplierApiKey: supplierServiceKey ? undefined : (supplierApiBaseUrl === apiBaseUrl ? apiKey : undefined),
     endUserSigningSecret: blank(env.JOURNEY_END_USER_SIGNING_SECRET),
-    // Do not probe the developer API for a price-feed account unless a price base or price key is configured.
+    // Do not probe for a price-feed account unless a price base or price key is configured.
     priceAccountBaseUrl: explicitPriceBase ?? (blank(env.JOURNEY_PRICE_API_KEY) ? priceApiBaseUrl : undefined),
     labsVerifyPath: blank(env.JOURNEY_LABS_VERIFY_PATH),
-    labsApiBaseUrl: blank(env.JOURNEY_LABS_API_BASE_URL)?.replace(/\/+$/, '') ?? blank(env.JOURNEY_APP_API_BASE_URL)?.replace(/\/+$/, '') ?? supplierApiBaseUrl,
+    labsApiBaseUrl: strip(env.JOURNEY_LABS_API_BASE_URL) ?? strip(env.JOURNEY_APP_API_BASE_URL) ?? supplierApiBaseUrl,
     labsServiceKey: blank(env.JOURNEY_LABS_SERVICE_KEY),
     keyLookupUrl: blank(env.JOURNEY_KEY_LOOKUP_URL),
     policyFile: blank(env.JOURNEY_POLICY_FILE),

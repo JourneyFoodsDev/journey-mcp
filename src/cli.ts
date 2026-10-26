@@ -13,11 +13,14 @@ Usage:
   npx -y @journeyfoods/mcp --version  Show the version
 
 Environment:
-  JOURNEY_PRICE_API_KEY   Journey price feed key (free trial: https://price.journeyfoods.io)
-  JOURNEY_API_KEY         Journey developer API key (https://dev.journeyfoods.io)
-  JOURNEY_PRICE_API_BASE_URL, JOURNEY_API_BASE_URL, JOURNEY_SUPPLIER_API_BASE_URL  Override base URLs
+  JOURNEY_PRICE_API_KEY   Price feed key (free trial: https://price.journeyfoods.io). Enables price tools.
+  JOURNEY_API_KEY         Developer API key (https://dev.journeyfoods.io). Required for ingredient tools.
+                          The price feed key is not accepted by the developer API.
+  JOURNEY_PRICE_API_BASE_URL   Default https://price.journeyfoods.io
+  JOURNEY_API_BASE_URL         Default https://devapi.journeyfoods.io
+  JOURNEY_SUPPLIER_API_BASE_URL  No default. Supplier data is on the hosted server unless you set this.
 
-Hosted server (no install): https://mcp.journeyfoods.io/mcp with header x-api-key.
+Hosted server (no install, includes suppliers): https://mcp.journeyfoods.io/mcp with header x-api-key.
 Docs: https://docs.journeyfoods.io
 `;
 
@@ -41,12 +44,15 @@ async function main() {
   // same account does not reset caps. The developer API key is forwarded only to the developer API.
   const identityKey = rt.cfg.priceApiKey ?? rt.cfg.apiKey;
   if (!identityKey) {
-    rt.log.error('JOURNEY_API_KEY is not set. Create a key at https://dev.journeyfoods.io and set it in your MCP client config.');
+    rt.log.error('Set JOURNEY_PRICE_API_KEY (free trial: https://price.journeyfoods.io) or JOURNEY_API_KEY (developer key: https://dev.journeyfoods.io).');
     process.exit(1);
   }
   const resolved = await rt.keys.resolve(identityKey);
+  // upstreamApiKey is the developer API key only. The price feed key is a different credential and is not forwarded.
   const account = { ...resolved, authMethod: 'local' as const, upstreamApiKey: rt.cfg.apiKey };
-  if (!rt.cfg.apiKey) rt.log.warn('JOURNEY_API_KEY is not set; running with the price feed key only. Developer API tools will be unavailable.');
+  if (!rt.cfg.apiKey) {
+    rt.log.warn('JOURNEY_API_KEY is not set. Ingredient tools need a developer API key from https://dev.journeyfoods.io. Price tools use JOURNEY_PRICE_API_KEY.');
+  }
   const server = createMcpServer({ account, data: rt.data, enforcer: rt.enforcer, log: rt.log, usage: rt.usage, transport: 'stdio' });
   await server.connect(new StdioServerTransport());
   rt.log.info('journey mcp running on stdio', { account: account.id });

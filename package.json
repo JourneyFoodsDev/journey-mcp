@@ -1,6 +1,6 @@
 {
   "name": "@journeyfoods/mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Journey AI MCP server: food and CPG supplier, ingredient and commodity price data for AI agents (Claude, ChatGPT, Cursor and other MCP clients).",
   "type": "module",
   "bin": {
