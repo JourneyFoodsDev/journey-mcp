@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { DEV_API_KEY_URL, HOSTED_MCP_URL, PRICE_API_KEY_URL } from './config.js';
 import { JourneyError, NotConnectedError } from './errors.js';
 import { capNotice, type Enforcer } from './policy/enforcer.js';
 import type { Logger } from './logger.js';
@@ -158,9 +159,26 @@ const FEATURE_LABEL = {
   suppliers: 'Journey supplier data',
 } as const;
 
-/** Clean "not connected yet" before any cap is touched when this server has no backend for the feature. */
+/**
+ * The price feed and the developer API do not accept each other's keys, and there is no public supplier route.
+ * Say which key to set, or point at the hosted server, instead of a generic "not connected".
+ */
+const UNAVAILABLE_DETAIL: Partial<Record<keyof typeof FEATURE_LABEL, string>> = {
+  ingredients:
+    `Journey ingredient data needs JOURNEY_API_KEY. Create a developer API key at ${DEV_API_KEY_URL} and set JOURNEY_API_KEY. ` +
+    `JOURNEY_PRICE_API_KEY is only for the price feed at ${PRICE_API_KEY_URL} and is not accepted by the developer API. No data was returned.`,
+  prices:
+    `Journey price data needs JOURNEY_PRICE_API_KEY. Get a free trial key at ${PRICE_API_KEY_URL} and set JOURNEY_PRICE_API_KEY. No data was returned.`,
+  suppliers:
+    `Journey supplier data is available on the hosted server at ${HOSTED_MCP_URL}. Send your API key in the x-api-key header. ` +
+    `This server has no JOURNEY_SUPPLIER_API_BASE_URL, and the developer and price APIs do not publish a public supplier route. No data was returned.`,
+};
+
+/** Refuse before any cap is touched when this server has no backend for the feature. */
 function need(ctx: ToolContext, feature: keyof typeof FEATURE_LABEL) {
-  if (ctx.data.available && !ctx.data.available(feature, cred(ctx))) throw new NotConnectedError(FEATURE_LABEL[feature]);
+  if (ctx.data.available && !ctx.data.available(feature, cred(ctx))) {
+    throw new NotConnectedError(FEATURE_LABEL[feature], UNAVAILABLE_DETAIL[feature]);
+  }
 }
 
 const cred = (ctx: ToolContext): { apiKey?: string; appToken?: string; endUser?: { userId?: string; companyId?: string; tier?: string; status?: string; role?: string } } => ({

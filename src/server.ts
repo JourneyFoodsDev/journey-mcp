@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerTools, type ToolContext } from './tools.js';
 
-export const SERVER_INFO = { name: 'journey-ai', title: 'Journey AI', version: '0.2.0' };
+export const SERVER_INFO = { name: 'journey-ai', title: 'Journey AI', version: '0.2.1' };
 
 export const INSTRUCTIONS =
   'Journey AI is read-only food and CPG supply chain data: suppliers, ingredients, ingredient prices and forecasts, your own Journey products and Journey Labs verification. ' +

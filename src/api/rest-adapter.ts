@@ -6,7 +6,7 @@ import { JourneyHttpClient, unwrap } from './client.js';
 import type { Credential, Ingredient, JourneyData, LabLookupOptions, LabResult, Price, PriceForecast, PriceSeriesSummary, Product, ProductQuery, ProductSummary, Supplier, SupplierQuery } from './types.js';
 
 /**
- * Endpoint map. Base URLs come from the environment.
+ * Endpoint map. Base URLs come from the environment, with production defaults in loadConfig.
  *
  * Suppliers  -> Journey app API: GET /api/v1/supplier/profiles?search=  and  /api/v1/supplier/profiles/:slug
  * Ingredients-> Journey developer API (x-api-key): GET /ingredients/search?q=, /ingredients/:id, /nutrients/:id, /allergens/:id
@@ -298,7 +298,7 @@ export class RestJourneyData implements JourneyData {
       case 'products':
         return Boolean(this.cfg.appApiBaseUrl && cred.appToken);
       case 'prices':
-        return Boolean(this.cfg.priceApiBaseUrl);
+        return Boolean(this.cfg.priceApiBaseUrl && this.cfg.priceApiKey);
       case 'suppliers':
         return Boolean(this.cfg.supplierApiBaseUrl);
     }
