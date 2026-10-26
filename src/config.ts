@@ -6,6 +6,7 @@ export interface JourneyConfig {
   appApiBaseUrl?: string;
   priceApiBaseUrl?: string;
   priceApiKey?: string;
+  /** Unused. A user key is never sent to the supplier backend as x-api-key. */
   supplierApiKey?: string;
   /** Explicit JOURNEY_SUPPLIER_API_KEY. Sent as x-journey-service-key, never as x-api-key. */
   supplierServiceKey?: string;
@@ -48,9 +49,9 @@ const strip = (v: string | undefined) => blank(v)?.replace(/\/+$/, '');
 
 /**
  * Public production bases. These are not secrets.
- * The developer API (ingredients) and the price feed issue different keys and do not accept each other's.
- * Confirmed in this repo (a key is never forwarded to a different base) and in the developer OpenAPI,
- * which requires a Developer API Key from https://dev.journeyfoods.io and publishes no price or supplier routes.
+ * Ingredients use the developer API (x-api-key). Prices use the price feed (/api/v1/commodities).
+ * Those two APIs issue different keys. Supplier profiles live only on an internal backend that
+ * needs a service key, so there is no default supplier URL and a user's key is never sent there.
  */
 export const DEFAULT_DEV_API_BASE_URL = 'https://devapi.journeyfoods.io';
 export const DEFAULT_PRICE_API_BASE_URL = 'https://price.journeyfoods.io';
@@ -66,12 +67,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): JourneyConfig 
   const explicitPriceBase = strip(env.JOURNEY_PRICE_API_BASE_URL);
   const apiBaseUrl = explicitApiBase ?? DEFAULT_DEV_API_BASE_URL;
   const priceApiBaseUrl = explicitPriceBase ?? DEFAULT_PRICE_API_BASE_URL;
-  // Supplier profiles are GET /api/v1/supplier/profiles on the Journey app API.
-  // Neither devapi.journeyfoods.io nor the price feed publishes that route.
-  // An explicit JOURNEY_API_BASE_URL other than the developer default is still reused,
-  // for deployments that serve ingredients and suppliers from one origin.
-  const supplierFromSharedOrigin = explicitApiBase && explicitApiBase !== DEFAULT_DEV_API_BASE_URL ? explicitApiBase : undefined;
-  const supplierApiBaseUrl = explicitSupplierBase ?? supplierFromSharedOrigin;
+  // Supplier profiles are only on the internal backend. Never inherit the developer or price URL.
+  const supplierApiBaseUrl = explicitSupplierBase;
   const port = Number(env.PORT || 3000);
   const apiKey = blank(env.JOURNEY_API_KEY);
   const supplierServiceKey = blank(env.JOURNEY_SUPPLIER_API_KEY);
@@ -83,9 +80,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): JourneyConfig 
     priceApiBaseUrl,
     // A key is only sent to the service that issued it. The price feed key is not a developer API key.
     priceApiKey: blank(env.JOURNEY_PRICE_API_KEY) ?? (priceApiBaseUrl === apiBaseUrl ? apiKey : undefined),
-    // The supplier service key is x-journey-service-key. Only reuse the developer key as x-api-key on the same origin.
+    // Service key only (x-journey-service-key). JOURNEY_API_KEY and JOURNEY_PRICE_API_KEY are never sent here.
     supplierServiceKey,
-    supplierApiKey: supplierServiceKey ? undefined : (supplierApiBaseUrl === apiBaseUrl ? apiKey : undefined),
+    supplierApiKey: undefined,
     endUserSigningSecret: blank(env.JOURNEY_END_USER_SIGNING_SECRET),
     // Do not probe for a price-feed account unless a price base or price key is configured.
     priceAccountBaseUrl: explicitPriceBase ?? (blank(env.JOURNEY_PRICE_API_KEY) ? priceApiBaseUrl : undefined),

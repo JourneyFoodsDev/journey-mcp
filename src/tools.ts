@@ -170,8 +170,8 @@ const UNAVAILABLE_DETAIL: Partial<Record<keyof typeof FEATURE_LABEL, string>> = 
   prices:
     `Journey price data needs JOURNEY_PRICE_API_KEY. Get a free trial key at ${PRICE_API_KEY_URL} and set JOURNEY_PRICE_API_KEY. No data was returned.`,
   suppliers:
-    `Journey supplier data is available on the hosted server at ${HOSTED_MCP_URL}. Send your API key in the x-api-key header. ` +
-    `This server has no JOURNEY_SUPPLIER_API_BASE_URL, and the developer and price APIs do not publish a public supplier route. No data was returned.`,
+    `Journey supplier data is on the hosted Journey MCP server at ${HOSTED_MCP_URL}. Send your API key in the x-api-key header. ` +
+    `Local npx does not call the internal supplier backend unless JOURNEY_SUPPLIER_API_BASE_URL is set, and a user API key is not sent there. No data was returned.`,
 };
 
 /** Refuse before any cap is touched when this server has no backend for the feature. */

@@ -27,6 +27,22 @@ const env = {
 };
 
 describe('RestJourneyData', () => {
+  it('never sends a user key to the supplier backend, even on the developer host', async () => {
+    const seen: Seen[] = [];
+    const d = new RestJourneyData(loadConfig({
+      ...env,
+      JOURNEY_SUPPLIER_API_BASE_URL: 'https://dev.example.test',
+      JOURNEY_SUPPLIER_API_KEY: 'service-key',
+      JOURNEY_PRICE_API_KEY: 'price-key',
+    }), silentLogger, mockFetch({
+      'dev.example.test/api/v1/supplier/profiles': { data: { mongo: true, data: [{ slug: 'acme', displayName: 'Acme', ingredients: ['oat'] }] } },
+    }, seen));
+    const rows = await d.searchSuppliers({ query: 'acme', limit: 5 }, { apiKey: 'caller-key' });
+    expect(rows.map((r) => r.id)).toEqual(['acme']);
+    expect(seen[0].headers['x-api-key']).toBeUndefined();
+    expect(seen[0].headers['x-journey-service-key']).toBe('service-key');
+  });
+
   it('maps supplier search to /api/v1/supplier/profiles and normalizes rows', async () => {
     const seen: Seen[] = [];
     const d = new RestJourneyData(loadConfig(env), silentLogger, mockFetch({
