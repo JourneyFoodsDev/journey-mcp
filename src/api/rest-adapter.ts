@@ -8,9 +8,10 @@ import type { Credential, Ingredient, JourneyData, LabLookupOptions, LabResult, 
 /**
  * Endpoint map. Base URLs come from the environment, with production defaults in loadConfig.
  *
- * Suppliers  -> Journey app API: GET /api/v1/supplier/profiles?search=  and  /api/v1/supplier/profiles/:slug
- * Ingredients-> Journey developer API (x-api-key): GET /ingredients/search?q=, /ingredients/:id, /nutrients/:id, /allergens/:id
- * Prices     -> Journey price feed (x-api-key): GET /api/v1/commodities, /api/v1/commodities/:symbol/quote|history|forecast
+ * Suppliers  -> Internal backend only (x-journey-service-key, never a user's x-api-key). No default base URL.
+ *               GET /api/v1/supplier/profiles?search=  and  /api/v1/supplier/profiles/:slug
+ * Ingredients-> Developer API https://devapi.journeyfoods.io (x-api-key): GET /ingredients/search?q=, /ingredients/:id, /nutrients/:id, /allergens/:id
+ * Prices     -> Price feed https://price.journeyfoods.io (x-api-key): GET /api/v1/commodities, /api/v1/commodities/:symbol/quote|history|forecast
  *               Prices are commodity-level; ingredient -> commodity mapping is a name/symbol match.
  * Products   -> Journey app API, the signed-in user's own products (remote OAuth only):
  *               GET /api/v1/product/product-list, /api/v1/product/product-detail/:id
@@ -109,7 +110,8 @@ export class RestJourneyData implements JourneyData {
   readonly labs: JourneyHttpClient;
   constructor(private readonly cfg: JourneyConfig, log: Logger, fetchImpl: typeof fetch = (input, init) => fetch(input, init)) {
     this.dev = new JourneyHttpClient(cfg.apiBaseUrl, cfg.apiKey, log, fetchImpl, cfg.requestTimeoutMs, 'journey-dev-api');
-    this.suppliers = new JourneyHttpClient(cfg.supplierApiBaseUrl, cfg.supplierApiKey, log, fetchImpl, cfg.requestTimeoutMs, 'journey-supplier-api');
+    // No default key: the internal supplier backend takes x-journey-service-key, not the caller's x-api-key.
+    this.suppliers = new JourneyHttpClient(cfg.supplierApiBaseUrl, undefined, log, fetchImpl, cfg.requestTimeoutMs, 'journey-supplier-api');
     this.prices = new JourneyHttpClient(cfg.priceApiBaseUrl, cfg.priceApiKey, log, fetchImpl, cfg.requestTimeoutMs, 'journey-price-api');
     // No default key: the verification summary is public, and the developer API key is never sent to the app API.
     this.labs = new JourneyHttpClient(cfg.labsApiBaseUrl, undefined, log, fetchImpl, cfg.requestTimeoutMs, 'journey-labs-api');

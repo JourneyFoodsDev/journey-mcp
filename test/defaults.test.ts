@@ -83,20 +83,27 @@ describe('loadConfig defaults and key fallbacks', () => {
     expect(shared.apiKey).toBe('dev-key');
   });
 
-  it('does not point suppliers at the developer API, and reuses a non-default shared origin', () => {
-    expect(loadConfig({ JOURNEY_API_BASE_URL: 'https://devapi.journeyfoods.io/' }).supplierApiBaseUrl).toBeUndefined();
-    const shared = loadConfig({ JOURNEY_API_BASE_URL: 'https://app.example.test/', JOURNEY_API_KEY: 'dev-key' });
-    expect(shared.supplierApiBaseUrl).toBe('https://app.example.test');
-    expect(shared.supplierApiKey).toBe('dev-key');
+  it('does not default a supplier URL or attach a user key, even on a shared origin', () => {
+    const shared = loadConfig({
+      JOURNEY_API_BASE_URL: 'https://app.example.test/',
+      JOURNEY_API_KEY: 'dev-key',
+      JOURNEY_PRICE_API_KEY: 'price-key',
+    });
+    expect(shared.supplierApiBaseUrl).toBeUndefined();
+    expect(shared.supplierApiKey).toBeUndefined();
     expect(shared.priceApiBaseUrl).toBe(DEFAULT_PRICE_API_BASE_URL);
     const explicit = loadConfig({
-      JOURNEY_API_BASE_URL: 'https://app.example.test',
-      JOURNEY_SUPPLIER_API_BASE_URL: 'https://suppliers.example.test',
+      JOURNEY_API_BASE_URL: 'https://internal.example.test',
+      JOURNEY_SUPPLIER_API_BASE_URL: 'https://internal.example.test/',
+      JOURNEY_API_KEY: 'dev-key',
+      JOURNEY_PRICE_API_KEY: 'price-key',
       JOURNEY_SUPPLIER_API_KEY: 'service-key',
     });
-    expect(explicit.supplierApiBaseUrl).toBe('https://suppliers.example.test');
+    expect(explicit.supplierApiBaseUrl).toBe('https://internal.example.test');
     expect(explicit.supplierServiceKey).toBe('service-key');
     expect(explicit.supplierApiKey).toBeUndefined();
+    expect(explicit.apiKey).toBe('dev-key');
+    expect(explicit.priceApiKey).toBe('price-key');
   });
 });
 
@@ -134,6 +141,7 @@ describe('npx with only JOURNEY_PRICE_API_KEY', () => {
     expect(json.price?.symbol).toBe('COCOA');
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every((s) => s.url.origin === DEFAULT_PRICE_API_BASE_URL)).toBe(true);
+    expect(seen.every((s) => s.url.pathname.startsWith('/api/v1/commodities'))).toBe(true);
     expect(seen.every((s) => s.headers['x-api-key'] === 'price-key')).toBe(true);
   });
 
@@ -148,14 +156,53 @@ describe('npx with only JOURNEY_PRICE_API_KEY', () => {
     expect(seen).toHaveLength(0);
   });
 
-  it('points supplier tools at the hosted server', async () => {
+  it('points local supplier tools at the hosted server and does not call an inherited URL', async () => {
     const seen: Seen[] = [];
-    const { result, json } = await call({ JOURNEY_PRICE_API_KEY: 'price-key' }, 'search_suppliers', { query: 'oat' }, mockFetch(priceRoutes, seen));
+    const { result, json } = await call(
+      { JOURNEY_PRICE_API_KEY: 'price-key', JOURNEY_API_KEY: 'dev-key', JOURNEY_API_BASE_URL: 'https://devapi.journeyfoods.io' },
+      'search_suppliers',
+      { query: 'oat' },
+      mockFetch(priceRoutes, seen),
+    );
     expect(result.isError).toBe(true);
     expect(json.message).toContain(HOSTED_MCP_URL);
     expect(json.message).toContain('x-api-key');
+    expect(json.message).toContain('JOURNEY_SUPPLIER_API_BASE_URL');
     expect(json.message?.toLowerCase()).not.toContain('not connected');
     expect(seen).toHaveLength(0);
+  });
+
+  it('calls an explicit supplier URL with the service key and not the user key', async () => {
+    const seen: Seen[] = [];
+    const routes = {
+      'internal.example.test/api/v1/supplier/profiles': {
+        data: { mongo: true, data: [{ slug: 'acme', displayName: 'Acme', ingredients: ['oat'] }] },
+      },
+    };
+    const cfg = loadConfig({
+      JOURNEY_API_KEY: 'dev-key',
+      JOURNEY_PRICE_API_KEY: 'price-key',
+      JOURNEY_SUPPLIER_API_BASE_URL: 'https://internal.example.test',
+      JOURNEY_SUPPLIER_API_KEY: 'service-key',
+    });
+    const data = new RestJourneyData(cfg, silentLogger, mockFetch(routes, seen));
+    const server = createMcpServer({
+      account: localAccount('dev-key'),
+      data,
+      enforcer: new PolicyEnforcer(DEFAULT_POLICY, new MemoryUsageStore()),
+      log: silentLogger,
+      transport: 'stdio',
+    });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'test', version: '0' });
+    await Promise.all([server.connect(a), client.connect(b)]);
+    const result = await client.callTool({ name: 'search_suppliers', arguments: { query: 'acme' } });
+    expect(result.isError).toBeFalsy();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].url.origin).toBe('https://internal.example.test');
+    expect(seen[0].url.pathname).toBe('/api/v1/supplier/profiles');
+    expect(seen[0].headers['x-journey-service-key']).toBe('service-key');
+    expect(seen[0].headers['x-api-key']).toBeUndefined();
   });
 
   it('names the price key when it is missing', async () => {

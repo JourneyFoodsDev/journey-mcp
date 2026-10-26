@@ -52,7 +52,7 @@ JOURNEY_PRICE_API_KEY=... JOURNEY_API_KEY=... npx -y @journeyfoods/mcp
 npx -y @journeyfoods/mcp --help
 ```
 
-`JOURNEY_PRICE_API_BASE_URL` and `JOURNEY_API_BASE_URL` override those defaults. Supplier search is not on either API. Without `JOURNEY_SUPPLIER_API_BASE_URL`, supplier tools point you at the hosted server `https://mcp.journeyfoods.io/mcp`.
+`JOURNEY_API_BASE_URL` overrides `https://devapi.journeyfoods.io` (ingredients, `x-api-key`). `JOURNEY_PRICE_API_BASE_URL` overrides `https://price.journeyfoods.io` (`/api/v1/commodities`). Supplier profiles are only on an internal backend that needs a service key. Local npx does not default a supplier URL and does not send your API key there. Unless you set `JOURNEY_SUPPLIER_API_BASE_URL`, supplier tools point you at the hosted server `https://mcp.journeyfoods.io/mcp`.
 
 ## Tools
 
@@ -84,7 +84,7 @@ When you reach a limit, the tool tells you and links to upgrade options. For ful
 
 ## Configuration
 
-See [`.env.example`](.env.example). Keys come from the environment, and no keys are stored in code. Each key is only sent to the service that issued it. The price base defaults to `https://price.journeyfoods.io` and the developer base defaults to `https://devapi.journeyfoods.io`. The policy file format is shown in [`policy.example.json`](policy.example.json).
+See [`.env.example`](.env.example). Keys come from the environment, and no keys are stored in code. Each key is only sent to the service that issued it. The developer API defaults to `https://devapi.journeyfoods.io` (`x-api-key`). The price feed defaults to `https://price.journeyfoods.io` (`/api/v1/commodities`). Supplier data has no default URL. The policy file format is shown in [`policy.example.json`](policy.example.json).
 
 ## Development
 
@@ -95,6 +95,16 @@ npm run build
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+
+## Release
+
+Push a `v*` tag, such as `v0.2.1`, to publish that commit. [`.github/workflows/publish.yml`](.github/workflows/publish.yml) runs on GitHub Actions with Node 22:
+
+```bash
+npm ci && npm test && npm publish --provenance --access public
+```
+
+The workflow uses npm Trusted Publishing (`permissions: id-token: write`). It does not use an `NPM_TOKEN`. Before the first tag, add this repository and `publish.yml` as a trusted publisher for `@journeyfoods/mcp` on npmjs.com. Tag the commit whose `package.json` version you want to ship (`v0.2.1` publishes `0.2.1`). `prepublishOnly` builds the package and runs the tests again before upload.
 
 ## License
 

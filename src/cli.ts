@@ -16,9 +16,10 @@ Environment:
   JOURNEY_PRICE_API_KEY   Price feed key (free trial: https://price.journeyfoods.io). Enables price tools.
   JOURNEY_API_KEY         Developer API key (https://dev.journeyfoods.io). Required for ingredient tools.
                           The price feed key is not accepted by the developer API.
-  JOURNEY_PRICE_API_BASE_URL   Default https://price.journeyfoods.io
-  JOURNEY_API_BASE_URL         Default https://devapi.journeyfoods.io
-  JOURNEY_SUPPLIER_API_BASE_URL  No default. Supplier data is on the hosted server unless you set this.
+  JOURNEY_PRICE_API_BASE_URL   Default https://price.journeyfoods.io (/api/v1/commodities)
+  JOURNEY_API_BASE_URL         Default https://devapi.journeyfoods.io (x-api-key)
+  JOURNEY_SUPPLIER_API_BASE_URL  No default. Internal backend; a user key is not sent.
+                                 Local supplier tools use the hosted server unless this is set.
 
 Hosted server (no install, includes suppliers): https://mcp.journeyfoods.io/mcp with header x-api-key.
 Docs: https://docs.journeyfoods.io
