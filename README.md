@@ -54,7 +54,7 @@ npx -y @journeyfoods/mcp --help
 
 `JOURNEY_API_BASE_URL` overrides `https://devapi.journeyfoods.io` (ingredients, `x-api-key`). `JOURNEY_PRICE_API_BASE_URL` overrides `https://price.journeyfoods.io` (`/api/v1/commodities`). Supplier profiles are only on an internal backend that needs a service key. Local npx does not default a supplier URL and does not send your API key there. Unless you set `JOURNEY_SUPPLIER_API_BASE_URL`, supplier tools point you at the hosted server `https://mcp.journeyfoods.io/mcp`.
 
-The hosted Worker (`worker/wrangler.jsonc`) is pinned to the Cloudflare fallback for the Nov 2 2026 Atlas outage: ingredients at `https://journey-fallback.journeyfoods.workers.dev/x/devapi`, supplier and app calls at `https://journey-fallback.journeyfoods.workers.dev/x/mcp`. That file is not what is live today. Do not deploy it until its bindings are reconciled with the live Worker. Price results from this server are indexes (base 100) and forecast ranges only.
+The hosted Worker (`worker/wrangler.jsonc`) uses the live binding names and points them at the Cloudflare fallback for the Nov 2 2026 Atlas outage: `JOURNEY_DEV_API_BASE` is `https://journey-fallback.journeyfoods.workers.dev/x/devapi` and `JOURNEY_API_BASE` is `https://journey-fallback.journeyfoods.workers.dev/x/mcp`. The file keeps the live Durable Object, KV, Analytics Engine, and secrets-store bindings. Price results from this server are indexes (base 100) and forecast ranges only.
 
 ## Tools
 

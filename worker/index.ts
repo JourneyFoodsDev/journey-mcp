@@ -5,6 +5,7 @@ import { buildRuntime } from '../src/runtime.js';
 import { createMcpServer } from '../src/server.js';
 import { readSecretBinding } from '../src/auth/end-user.js';
 import { AuthError } from '../src/errors.js';
+export { AccountLedger, JourneyMcp } from './durable-objects.js';
 
 /**
  * Cloudflare fallback for the Nov 2 2026 Atlas outage.
@@ -29,6 +30,15 @@ export interface WorkerEnv {
   JOURNEY_PRICE_API_BASE_URL?: string;
   /** Live Worker name. Mapped onto JOURNEY_PRICE_API_BASE_URL when that is unset. */
   JOURNEY_PRICE_API_BASE?: string;
+  JOURNEY_APP_URL?: string;
+  MCP_RESOURCE?: string;
+  OAUTH_KV?: unknown;
+  MCP_OBJECT?: unknown;
+  ACCOUNT_LEDGER?: unknown;
+  USAGE_EVENTS?: unknown;
+  FIREBASE_WEB_API_KEY?: unknown;
+  JOURNEY_PRICE_API_KEY?: unknown;
+  SESSION_SECRET?: unknown;
   JOURNEY_SUPPLIER_API_KEY?: unknown;
   JOURNEY_END_USER_SIGNING_SECRET?: unknown;
   [key: string]: unknown;
