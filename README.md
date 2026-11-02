@@ -54,6 +54,8 @@ npx -y @journeyfoods/mcp --help
 
 `JOURNEY_API_BASE_URL` overrides `https://devapi.journeyfoods.io` (ingredients, `x-api-key`). `JOURNEY_PRICE_API_BASE_URL` overrides `https://price.journeyfoods.io` (`/api/v1/commodities`). Supplier profiles are only on an internal backend that needs a service key. Local npx does not default a supplier URL and does not send your API key there. Unless you set `JOURNEY_SUPPLIER_API_BASE_URL`, supplier tools point you at the hosted server `https://mcp.journeyfoods.io/mcp`.
 
+The hosted Worker (`worker/wrangler.jsonc`) is pinned to the Cloudflare fallback for the Nov 2 2026 Atlas outage: ingredients at `https://journey-fallback.journeyfoods.workers.dev/x/devapi`, supplier and app calls at `https://journey-fallback.journeyfoods.workers.dev/x/mcp`. That file is not what is live today. Do not deploy it until its bindings are reconciled with the live Worker. Price results from this server are indexes (base 100) and forecast ranges only.
+
 ## Tools
 
 | Tool | What it does |
@@ -63,8 +65,8 @@ npx -y @journeyfoods/mcp --help
 | `compare_suppliers` | Compare two to five suppliers side by side, including what they share |
 | `search_ingredients` | Search the Journey ingredient database, with nutrition and sustainability scores |
 | `get_ingredient` | Ingredient profile: nutrition per 100 g, scores, nutrients, allergens and attributes |
-| `get_ingredient_price` | Reference price, recent history and optional forecast for a commodity such as cocoa, sugar or coffee |
-| `list_price_series` | Every ingredient and commodity Journey publishes prices for (names and units only) |
+| `get_ingredient_price` | Price index (base 100) and recent index history, plus an optional P10/P50/P90 forecast range. Raw prices are not returned |
+| `list_price_series` | Every ingredient and commodity Journey publishes an index for (names and units only; no levels) |
 | `search_products` | Search your own products and formulations (signed-in Journey accounts) |
 | `get_product` | One of your products: summary, ingredients and nutrition panel |
 | `verify_lab_result` | Check whether an ingredient, product or supplier has a Journey Labs verified result |

@@ -300,12 +300,12 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
   server.registerTool(
     'get_ingredient_price',
     {
-      title: 'Get ingredient price',
-      description: 'Get the current Journey reference price and recent price history for an ingredient or commodity (e.g. cocoa, sugar, coffee). Prices are commodity-level series.',
+      title: 'Get ingredient price index',
+      description: 'Get the Journey price index (base 100) and recent index history for an ingredient or commodity (e.g. cocoa, sugar, coffee). Values are indexes, not raw prices. Set include_forecast for the P10/P50/P90 range on the same index.',
       inputSchema: {
         ingredient: z.string().min(2).max(100).describe('Ingredient or commodity name or symbol, e.g. "cocoa" or "COCOA"'),
-        days: z.number().int().min(1).max(3650).default(365).describe('History window in days (default 365)'),
-        include_forecast: z.boolean().default(false).describe('Also return the Journey P10/P50/P90 forecast (published only where it beats a naive backtest)'),
+        days: z.number().int().min(1).max(3650).default(365).describe('History window in days (default 365). The earliest point in the window is index 100.'),
+        include_forecast: z.boolean().default(false).describe('Also return the P10/P50/P90 forecast range on the same base-100 index (published only where it beats a naive backtest)'),
       },
       outputSchema: { price: PriceSchema, forecast: PriceForecastSchema.optional() },
       annotations: { title: 'Get ingredient price', ...READ_ONLY },
@@ -321,7 +321,8 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
       await ctx.enforcer.admit(ctx.account, 'price_series', [p], (x) => x.series_id);
       // The forecast belongs to the same series, so it adds no new record to the count.
       let forecast: PriceForecast | undefined;
-      if (a.include_forecast) forecast = (await ctx.data.getPriceForecast(p.symbol, Math.min(a.days ?? 90, 90), cred(ctx))) ?? undefined;
+      // Same history window as the index so the forecast shares its base of 100. The adapter caps the horizon at 90 days.
+      if (a.include_forecast) forecast = (await ctx.data.getPriceForecast(p.symbol, a.days ?? 365, cred(ctx))) ?? undefined;
       return ok(forecast ? { price: p, forecast } : { price: p });
     }),
   );
@@ -330,7 +331,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
     'list_price_series',
     {
       title: 'List price series',
-      description: 'List the ingredients and commodities Journey publishes reference prices for (symbol, name, unit, currency). No prices are included; use get_ingredient_price for those.',
+      description: 'List the ingredients and commodities Journey publishes a price index for (symbol, name, unit, currency). No index levels and no raw prices are included; use get_ingredient_price for the index.',
       inputSchema: {},
       outputSchema: { series: z.array(PriceSeriesSummarySchema), returned: z.number().int() },
       annotations: { title: 'List price series', ...READ_ONLY },

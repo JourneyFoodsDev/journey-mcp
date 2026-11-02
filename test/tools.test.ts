@@ -80,8 +80,9 @@ describe('get_ingredient_price', () => {
   it('returns current price and history', async () => {
     const { call } = await connect();
     const r = await call('get_ingredient_price', { ingredient: 'cocoa', days: 90 });
-    expect(r.structuredContent.price).toMatchObject({ symbol: 'COCOA', current: { price: 8123.4 } });
+    expect(r.structuredContent.price).toMatchObject({ symbol: 'COCOA', base: 100, unit: 'index', current: { index: 97.9 } });
     expect(r.structuredContent.price.history).toHaveLength(2);
+    expect(JSON.stringify(r.structuredContent)).not.toContain('8123.4');
   });
   it('returns not_found for an unpriced ingredient', async () => {
     const { call } = await connect();

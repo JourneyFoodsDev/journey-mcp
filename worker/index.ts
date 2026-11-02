@@ -6,8 +6,29 @@ import { createMcpServer } from '../src/server.js';
 import { readSecretBinding } from '../src/auth/end-user.js';
 import { AuthError } from '../src/errors.js';
 
+/**
+ * Cloudflare fallback for the Nov 2 2026 Atlas outage.
+ * Rollback (mcp_rollback_vars.json): supplier and app bases return to the Cloud Run API,
+ * and JOURNEY_API_BASE_URL returns to https://devapi.journeyfoods.io.
+ */
+export const FALLBACK_DEV_API_BASE = 'https://journey-fallback.journeyfoods.workers.dev/x/devapi';
+export const FALLBACK_MCP_API_BASE = 'https://journey-fallback.journeyfoods.workers.dev/x/mcp';
+
 /** Bindings the Worker receives. Secrets Store values are objects with get(), not strings. */
 export interface WorkerEnv {
+  /** This repo's developer API base. Live Worker name: JOURNEY_DEV_API_BASE. */
+  JOURNEY_API_BASE_URL?: string;
+  /** Live Worker name for the developer API. Mapped onto JOURNEY_API_BASE_URL when that is unset. */
+  JOURNEY_DEV_API_BASE?: string;
+  /** This repo's supplier API base. Live Worker name: JOURNEY_API_BASE. */
+  JOURNEY_SUPPLIER_API_BASE_URL?: string;
+  /** This repo's app API base. Live Worker sets this from JOURNEY_API_BASE. */
+  JOURNEY_APP_API_BASE_URL?: string;
+  /** Live Worker name for the Node API (suppliers, products, labs). */
+  JOURNEY_API_BASE?: string;
+  JOURNEY_PRICE_API_BASE_URL?: string;
+  /** Live Worker name. Mapped onto JOURNEY_PRICE_API_BASE_URL when that is unset. */
+  JOURNEY_PRICE_API_BASE?: string;
   JOURNEY_SUPPLIER_API_KEY?: unknown;
   JOURNEY_END_USER_SIGNING_SECRET?: unknown;
   [key: string]: unknown;
@@ -21,6 +42,13 @@ function stringEnv(env: WorkerEnv): NodeJS.ProcessEnv {
 
 export async function loadWorkerConfig(env: WorkerEnv) {
   const proc = stringEnv(env);
+  // Prefer this repo's names. Fall back to the live Worker's names, then to the Cloudflare copy.
+  // An explicit rollback URL (Cloud Run or devapi) still wins over the fallback.
+  if (!proc.JOURNEY_API_BASE_URL) proc.JOURNEY_API_BASE_URL = proc.JOURNEY_DEV_API_BASE || FALLBACK_DEV_API_BASE;
+  if (!proc.JOURNEY_SUPPLIER_API_BASE_URL) proc.JOURNEY_SUPPLIER_API_BASE_URL = proc.JOURNEY_API_BASE || FALLBACK_MCP_API_BASE;
+  // App reads follow the supplier base. An explicit supplier URL wins over the live JOURNEY_API_BASE name.
+  if (!proc.JOURNEY_APP_API_BASE_URL) proc.JOURNEY_APP_API_BASE_URL = proc.JOURNEY_SUPPLIER_API_BASE_URL;
+  if (!proc.JOURNEY_PRICE_API_BASE_URL && proc.JOURNEY_PRICE_API_BASE) proc.JOURNEY_PRICE_API_BASE_URL = proc.JOURNEY_PRICE_API_BASE;
   const supplier = await readSecretBinding(env.JOURNEY_SUPPLIER_API_KEY);
   // Missing signing secret: leave it unset so backend calls omit the end-user headers instead of 401ing.
   const signing = await readSecretBinding(env.JOURNEY_END_USER_SIGNING_SECRET, { optional: true });
@@ -54,6 +82,7 @@ export default {
     if (request.method === 'GET' && url.pathname === '/') {
       return Response.json({ name: 'Journey AI', mcp: `${url.origin}/mcp`, auth: ['api_key'], docs: 'https://journeyfoods.io/mcp' });
     }
+    // Every data endpoint requires an API key. `/` is discovery only and returns no Journey data.
     if (url.pathname !== '/mcp') return Response.json({ error: 'not_found' }, { status: 404 });
     if (request.method !== 'POST') {
       return Response.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed. This server is stateless; use POST.' }, id: null }, { status: 405 });

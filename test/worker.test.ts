@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import worker, { loadWorkerConfig } from '../worker/index.js';
+import worker, { FALLBACK_DEV_API_BASE, FALLBACK_MCP_API_BASE, loadWorkerConfig } from '../worker/index.js';
+import { DEFAULT_PRICE_API_BASE_URL } from '../src/config.js';
 
 describe('hosted worker', () => {
   it('serves the public root and requires an API key on /mcp', async () => {
@@ -23,5 +24,42 @@ describe('hosted worker', () => {
     expect(cfg.priceAccountBaseUrl).toBe('https://price.example.test');
     const missing = await loadWorkerConfig({ JOURNEY_END_USER_SIGNING_SECRET: { async get() { throw new Error('not bound'); } } });
     expect(missing.endUserSigningSecret).toBeUndefined();
+    expect(missing.apiBaseUrl).toBe(FALLBACK_DEV_API_BASE);
+    expect(missing.supplierApiBaseUrl).toBe(FALLBACK_MCP_API_BASE);
+    expect(missing.appApiBaseUrl).toBe(FALLBACK_MCP_API_BASE);
+    expect(missing.priceApiBaseUrl).toBe(DEFAULT_PRICE_API_BASE_URL);
+  });
+
+  it('maps the live Worker binding names onto this repo and does not override an explicit rollback URL', async () => {
+    const live = await loadWorkerConfig({
+      JOURNEY_API_BASE: FALLBACK_MCP_API_BASE,
+      JOURNEY_DEV_API_BASE: FALLBACK_DEV_API_BASE,
+      JOURNEY_PRICE_API_BASE: 'https://price.journeyfoods.io',
+    });
+    expect(live.apiBaseUrl).toBe(FALLBACK_DEV_API_BASE);
+    expect(live.supplierApiBaseUrl).toBe(FALLBACK_MCP_API_BASE);
+    expect(live.appApiBaseUrl).toBe(FALLBACK_MCP_API_BASE);
+    expect(live.priceApiBaseUrl).toBe('https://price.journeyfoods.io');
+
+    const rollback = await loadWorkerConfig({
+      JOURNEY_API_BASE_URL: 'https://devapi.journeyfoods.io',
+      JOURNEY_DEV_API_BASE: FALLBACK_DEV_API_BASE,
+      JOURNEY_SUPPLIER_API_BASE_URL: 'https://journeyfoods-api-prod-17792015607.us-central1.run.app',
+      JOURNEY_API_BASE: FALLBACK_MCP_API_BASE,
+    });
+    expect(rollback.apiBaseUrl).toBe('https://devapi.journeyfoods.io');
+    expect(rollback.supplierApiBaseUrl).toBe('https://journeyfoods-api-prod-17792015607.us-central1.run.app');
+    expect(rollback.appApiBaseUrl).toBe('https://journeyfoods-api-prod-17792015607.us-central1.run.app');
+  });
+
+  it('requires an API key on /mcp and does not serve data from any other path', async () => {
+    const denied = await worker.fetch(new Request('https://mcp.journeyfoods.io/mcp', { method: 'POST', headers: { 'x-api-key': '   ' }, body: '{}' }), {});
+    expect(denied.status).toBe(401);
+    const missing = await worker.fetch(new Request('https://mcp.journeyfoods.io/data/v1/jai/index'), {});
+    expect(missing.status).toBe(404);
+    const root = await worker.fetch(new Request('https://mcp.journeyfoods.io/'), {});
+    const body = await root.json() as { name?: string };
+    expect(body.name).toBe('Journey AI');
+    expect(JSON.stringify(body)).not.toMatch(/price|index|supplier/i);
   });
 });

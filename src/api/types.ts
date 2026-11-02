@@ -32,14 +32,17 @@ export const IngredientSchema = z.object({
 });
 export type Ingredient = z.infer<typeof IngredientSchema>;
 
-export const PricePointSchema = z.object({ date: z.string(), price: z.number() });
+/** Index point. `index` is a base-100 level, never a raw price. */
+export const PricePointSchema = z.object({ date: z.string(), index: z.number() });
 export const PriceSchema = z.object({
   series_id: z.string(),
   ingredient: z.string(),
   symbol: z.string(),
-  unit: z.string().nullable().optional(),
-  currency: z.string().nullable().optional(),
-  current: z.object({ price: z.number().nullable(), as_of: z.string().nullable().optional(), change_pct: z.number().nullable().optional() }),
+  /** Always "index". Raw units such as USD/mt are not returned. */
+  unit: z.literal('index'),
+  /** The index is scaled so the base observation is 100. */
+  base: z.literal(100),
+  current: z.object({ index: z.number().nullable(), as_of: z.string().nullable().optional(), change_pct: z.number().nullable().optional() }),
   history: z.array(PricePointSchema),
   source: z.string().nullable().optional(),
   methodology_url: z.string().nullable().optional(),
@@ -80,6 +83,9 @@ export type IngredientSummary = z.infer<typeof IngredientSummarySchema>;
 export const ForecastPointSchema = z.object({ date: z.string(), p10: z.number(), p50: z.number(), p90: z.number() });
 export const PriceForecastSchema = z.object({
   published: z.boolean(),
+  /** Forecast ranges use the same base-100 index as the history. */
+  base: z.literal(100),
+  unit: z.literal('index'),
   horizon_unit: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
   beats_naive_by_pct: z.number().nullable().optional(),

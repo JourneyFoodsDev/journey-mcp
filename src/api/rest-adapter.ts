@@ -3,6 +3,7 @@ import type { JourneyConfig } from '../config.js';
 import type { Logger } from '../logger.js';
 import { signEndUser } from '../auth/end-user.js';
 import { JourneyHttpClient, unwrap } from './client.js';
+import { INDEX_BASE, indexForecast, indexHistory, indexLevel, omitRawPrices, readIndex, readRawLevel } from './prices.js';
 import type { Credential, Ingredient, JourneyData, LabLookupOptions, LabResult, Price, PriceForecast, PriceSeriesSummary, Product, ProductQuery, ProductSummary, Supplier, SupplierQuery } from './types.js';
 
 /**
@@ -12,7 +13,8 @@ import type { Credential, Ingredient, JourneyData, LabLookupOptions, LabResult, 
  *               GET /api/v1/supplier/profiles?search=  and  /api/v1/supplier/profiles/:slug
  * Ingredients-> Developer API https://devapi.journeyfoods.io (x-api-key): GET /ingredients/search?q=, /ingredients/:id, /nutrients/:id, /allergens/:id
  * Prices     -> Price feed https://price.journeyfoods.io (x-api-key): GET /api/v1/commodities, /api/v1/commodities/:symbol/quote|history|forecast
- *               Prices are commodity-level; ingredient -> commodity mapping is a name/symbol match.
+ *               Tool results are a base-100 index and P10–P90 ranges. Raw levels are not returned.
+ *               Ingredient -> commodity mapping is a name/symbol match.
  * Products   -> Journey app API, the signed-in user's own products (remote OAuth only):
  *               GET /api/v1/product/product-list, /api/v1/product/product-detail/:id
  * Labs       -> Journey app API: GET /api/v1/lab-results/verify (set JOURNEY_LABS_VERIFY_PATH to enable)
@@ -188,7 +190,8 @@ export class RestJourneyData implements JourneyData {
     }
     const attrs: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(row)) if (!(k in base) && !['_id', 'energy', 'protein', 'fat', 'carbs', 'fiber', 'sodium', 'sugar'].includes(k)) attrs[k] = v;
-    if (Object.keys(attrs).length) base.attributes = attrs;
+    const safe = omitRawPrices(attrs);
+    if (Object.keys(safe).length) base.attributes = safe;
     return base;
   }
 
@@ -210,16 +213,25 @@ export class RestJourneyData implements JourneyData {
     const quote = (unwrap(quoteRaw) ?? {}) as Record<string, unknown>;
     const histObj = (histRaw ?? {}) as Record<string, unknown>;
     const series = Array.isArray(histObj.data) ? (histObj.data as Record<string, unknown>[]) : [];
+    const history = indexHistory(series, num, str);
+    const quoteIndex = readIndex(quote, num);
+    const quoteRawLevel = readRawLevel(quote, num);
+    const alreadyIndex = history.alreadyIndex || quoteIndex !== null;
+    const rawBase = alreadyIndex ? null : (history.rawBase ?? quoteRawLevel);
+    // A raw quote is never copied. It is scaled onto the history base, or omitted when the series is already an index.
+    const currentIndex = quoteIndex !== null
+      ? indexLevel(quoteIndex, null, true)
+      : alreadyIndex
+        ? null
+        : indexLevel(quoteRawLevel, rawBase, false);
     return {
       series_id: `commodity:${symbol}`,
       ingredient,
       symbol,
-      unit: str(hit.unit) ?? str(histObj.unit),
-      currency: str(hit.currency) ?? str(histObj.currency),
-      current: { price: num(quote.price ?? quote.last ?? quote.value), as_of: str(quote.date ?? quote.asOf), change_pct: num(quote.changePct ?? quote.change_pct) },
-      history: series
-        .map((p) => ({ date: str(p.date ?? p.month) ?? '', price: num(p.price ?? p.value ?? p.close) }))
-        .filter((p): p is { date: string; price: number } => Boolean(p.date) && p.price !== null),
+      unit: 'index' as const,
+      base: INDEX_BASE,
+      current: { index: currentIndex, as_of: str(quote.date ?? quote.asOf), change_pct: num(quote.changePct ?? quote.change_pct) },
+      history: history.points,
       source: str(histObj.source),
       methodology_url: str(histObj.methodologyUrl),
     };
@@ -272,23 +284,32 @@ export class RestJourneyData implements JourneyData {
     if (!Array.isArray(list)) throw new UpstreamError('Price list returned an unexpected shape.', 502, ENDPOINTS.commodityList);
     // Names and units only: the list never includes prices, so it does not count toward any cap.
     return (list as Record<string, unknown>[])
-      .map((c) => ({ symbol: String(c.symbol ?? ''), name: str(c.name) ?? String(c.symbol ?? ''), category: str(c.category), unit: str(c.unit), currency: str(c.currency) }))
+      .map((c) => omitRawPrices({ symbol: String(c.symbol ?? ''), name: str(c.name) ?? String(c.symbol ?? ''), category: str(c.category), unit: str(c.unit), currency: str(c.currency) }))
       .filter((c) => c.symbol);
   }
 
+  /**
+   * Forecast ranges on the same base-100 index as getIngredientPrice's history window.
+   * The upstream forecast query stays capped at 90 days. Raw levels are not returned.
+   */
   async getPriceForecast(symbol: string, days: number, _cred: Credential): Promise<PriceForecast | null> {
-    const raw = (await this.prices.request(ENDPOINTS.commodity(symbol, 'forecast'), { query: { days } })) as Record<string, unknown> | null;
+    const histRaw = await this.prices.request(ENDPOINTS.commodity(symbol, 'history'), { query: { days } });
+    const histObj = (histRaw ?? {}) as Record<string, unknown>;
+    const series = Array.isArray(histObj.data) ? (histObj.data as Record<string, unknown>[]) : [];
+    const history = indexHistory(series, num, str);
+    const raw = (await this.prices.request(ENDPOINTS.commodity(symbol, 'forecast'), { query: { days: Math.min(days, 90) } })) as Record<string, unknown> | null;
     if (!raw) return null;
+    const payloadIndex = raw.base === INDEX_BASE || raw.unit === 'index' || raw.kind === 'index';
     const pts = Array.isArray(raw.data) ? (raw.data as Record<string, unknown>[]) : [];
-    return {
+    return omitRawPrices({
       published: raw.published === true,
+      base: INDEX_BASE,
+      unit: 'index' as const,
       horizon_unit: str(raw.horizonUnit),
       model: str(raw.model),
       beats_naive_by_pct: num(raw.beatsNaiveByPct),
-      points: pts
-        .map((p) => ({ date: str(p.date) ?? '', p10: num(p.p10), p50: num(p.p50), p90: num(p.p90) }))
-        .filter((p): p is { date: string; p10: number; p50: number; p90: number } => Boolean(p.date) && p.p10 !== null && p.p50 !== null && p.p90 !== null),
-    };
+      points: indexForecast(pts, num, str, history.rawBase, payloadIndex || history.alreadyIndex),
+    });
   }
 
   available(feature: 'ingredients' | 'labs' | 'products' | 'prices' | 'suppliers', cred: Credential): boolean {
@@ -335,13 +356,13 @@ export class RestJourneyData implements JourneyData {
       ? (r.ingredients as unknown[]).map((x) => (x && typeof x === 'object' ? (x as Record<string, unknown>) : { name: String(x) }))
       : undefined;
     const nutrition = r.nutrition && typeof r.nutrition === 'object' ? (r.nutrition as Record<string, unknown>) : null;
-    return {
+    return omitRawPrices({
       ...base,
       ingredients,
       nutrition,
       nutrition_score: r.Nutrition,
       serving_size: r['Serving Size'],
       serving_size_unit: str(r.unitServingSize),
-    };
+    });
   }
 }

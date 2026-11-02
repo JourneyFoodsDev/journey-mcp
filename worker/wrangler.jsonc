@@ -1,9 +1,23 @@
 {
+  // WARNING: main and the live Worker diverge. Do not deploy until they are reconciled.
+  // The live journey-mcp Worker (mcp.journeyfoods.io) was deployed from journey-nodejs
+  // mcp/ (branch cursor/journey-mcp-staging-971e), not from this file. A wrangler deploy
+  // from this file replaces bindings. Live names that this file does not declare, and
+  // that a deploy would drop: JOURNEY_API_BASE, JOURNEY_DEV_API_BASE, JOURNEY_PRICE_API_BASE,
+  // JOURNEY_APP_URL, MCP_RESOURCE, MCP_OBJECT (JourneyMcp), ACCOUNT_LEDGER (AccountLedger),
+  // OAUTH_KV, USAGE_EVENTS, FIREBASE_WEB_API_KEY, JOURNEY_PRICE_API_KEY, SESSION_SECRET.
+  // Live secrets store id is 7a5116d7ce5d482e8e8cec9e2554c765; this file still says
+  // default_secrets_store. Live compatibility_date is 2026-10-16 with
+  // global_fetch_strictly_public. worker/index.ts maps the live names onto the names below.
+  //
+  // Atlas outage Nov 2 2026 — revert to Cloud Run / devapi when Atlas is back
+  // (values in mcp_rollback_vars.json):
+  //   JOURNEY_SUPPLIER_API_BASE_URL and JOURNEY_APP_API_BASE_URL
+  //     -> https://journeyfoods-api-prod-17792015607.us-central1.run.app
+  //   JOURNEY_API_BASE_URL -> https://devapi.journeyfoods.io
+  // JOURNEY_PRICE_API_BASE_URL stays https://price.journeyfoods.io.
+  // Do not deploy from CI. Confirm the Worker name before any deploy.
   // Hosted Journey AI MCP Worker (mcp.journeyfoods.io).
-  // A deploy from this file replaces the Worker's bindings. Main did not have this
-  // file; the live Worker was deployed from a local branch that bound the supplier
-  // service key. Keep that binding so a deploy does not drop it.
-  // Confirm the Worker name matches production before deploying. Do not deploy from CI.
   "name": "journey-mcp",
   "main": "index.ts",
   "compatibility_date": "2026-10-20",
@@ -13,6 +27,14 @@
     "traces": {
       "enabled": true
     }
+  },
+  // Atlas outage Nov 2 2026 — revert to Cloud Run / devapi when Atlas is back (values in mcp_rollback_vars.json).
+  // These are this repo's names. Live bindings are JOURNEY_DEV_API_BASE and JOURNEY_API_BASE.
+  "vars": {
+    "JOURNEY_API_BASE_URL": "https://journey-fallback.journeyfoods.workers.dev/x/devapi",
+    "JOURNEY_SUPPLIER_API_BASE_URL": "https://journey-fallback.journeyfoods.workers.dev/x/mcp",
+    "JOURNEY_APP_API_BASE_URL": "https://journey-fallback.journeyfoods.workers.dev/x/mcp",
+    "JOURNEY_PRICE_API_BASE_URL": "https://price.journeyfoods.io"
   },
   "secrets_store_secrets": [
     {

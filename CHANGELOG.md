@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Atlas outage (Nov 2 2026): the hosted Worker reads ingredients from `https://journey-fallback.journeyfoods.workers.dev/x/devapi` and supplier/app data from `https://journey-fallback.journeyfoods.workers.dev/x/mcp`. Revert those vars to Cloud Run / `https://devapi.journeyfoods.io` when Atlas is back (`mcp_rollback_vars.json`). The price feed stays `https://price.journeyfoods.io`. Price tools return a base-100 index and P10–P90 ranges only.
 - Self-serve data access is exactly 2% of each dataset per company or account. The Startup 4,000 ingredient cap is removed. Fresh has no supplier-network allowance. Supplier is a paid plan. Enterprise is uncapped only while status is active or trialing.
 - Supplier, ingredient, product and lab calls forward a signed `x-journey-end-user` when `JOURNEY_END_USER_SIGNING_SECRET` is set. API-key identity prefers the price feed account's company or account id so a new key does not reset the cap.
 
