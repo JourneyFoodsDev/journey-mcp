@@ -54,7 +54,7 @@ export class MockData implements JourneyData {
   }
   async getIngredientPrice(ing: string): Promise<Price | null> {
     if (ing.toLowerCase() !== 'cocoa') return null;
-    return { series_id: 'commodity:COCOA', ingredient: ing, symbol: 'COCOA', unit: 'USD/mt', currency: 'USD', current: { price: 8123.4, as_of: '2026-09-01', change_pct: -2.1 }, history: [{ date: '2026-08-01', price: 8300 }, { date: '2026-09-01', price: 8123.4 }], source: 'IMF/FRED' };
+    return { series_id: 'commodity:COCOA', ingredient: ing, symbol: 'COCOA', unit: 'index' as const, base: 100 as const, current: { index: 97.9, as_of: '2026-09-01', change_pct: -2.1 }, history: [{ date: '2026-08-01', index: 100 }, { date: '2026-09-01', index: 97.9 }], source: 'IMF/FRED' };
   }
   products = new Map<string, Product>();
   async listPriceSeries() {
@@ -62,7 +62,7 @@ export class MockData implements JourneyData {
   }
   async getPriceForecast(symbol: string): Promise<PriceForecast | null> {
     if (symbol !== 'COCOA') return null;
-    return { published: true, horizon_unit: 'month', model: 'ets', beats_naive_by_pct: 12, points: [{ date: '2026-11-01', p10: 7000, p50: 8000, p90: 9000 }] };
+    return { published: true, base: 100 as const, unit: 'index' as const, horizon_unit: 'month', model: 'ets', beats_naive_by_pct: 12, points: [{ date: '2026-11-01', p10: 90, p50: 100, p90: 110 }] };
   }
   async searchProducts(q: ProductQuery, cred: Credential) {
     if (!cred.appToken) throw new NotConnectedError('Product lookup');

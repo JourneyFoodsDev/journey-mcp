@@ -40,7 +40,9 @@ describe('merged tool set', () => {
     const acct = account('free', 'acct:fc');
     const { client } = await connect({ account: acct, enforcer });
     const r = await client.callTool({ name: 'get_ingredient_price', arguments: { ingredient: 'cocoa', include_forecast: true } });
-    expect(sc(r).forecast.points[0].p50).toBe(8000);
+    expect(sc(r).forecast).toMatchObject({ base: 100, unit: 'index' });
+    expect(sc(r).forecast.points[0].p50).toBe(100);
+    expect(JSON.stringify(sc(r))).not.toContain('8000');
     const used = (await enforcer.usage(acct)).used;
     expect(used.price_series).toBe(1);
     expect(used.ingredient).toBe(1);

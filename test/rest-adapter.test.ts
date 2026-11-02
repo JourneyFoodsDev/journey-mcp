@@ -69,12 +69,13 @@ describe('RestJourneyData', () => {
   it('maps ingredients to the dev API with x-api-key and enriches nutrients and allergens', async () => {
     const seen: Seen[] = [];
     const d = new RestJourneyData(loadConfig(env), silentLogger, mockFetch({
-      'dev.example.test/ingredients/abc': { id: 'abc', name: 'Mango, boiled', protein: 2.76, nutrition_score: 72.7, sustainability_score: 45.2, category: 'Fruit' },
+      'dev.example.test/ingredients/abc': { id: 'abc', name: 'Mango, boiled', protein: 2.76, nutrition_score: 72.7, sustainability_score: 45.2, category: 'Fruit', price: 4.5, priceScore: 80 },
       'dev.example.test/nutrients/abc': { id: 'abc', name: 'Mango', potassium: '232.4', sugar: '11.9' },
       'dev.example.test/allergens/abc': { allergens_flat: [], allergens_by_country: [] },
     }, seen));
     const ing = await d.getIngredient('abc', {});
-    expect(ing).toMatchObject({ id: 'abc', name: 'Mango, boiled', nutrition_per_100g: { protein: 2.76 }, nutrients: { potassium: '232.4' }, allergens: [], attributes: { category: 'Fruit' } });
+    expect(ing).toMatchObject({ id: 'abc', name: 'Mango, boiled', nutrition_per_100g: { protein: 2.76 }, nutrients: { potassium: '232.4' }, allergens: [], attributes: { category: 'Fruit', priceScore: 80 } });
+    expect(JSON.stringify(ing)).not.toContain('4.5');
     expect(seen.every((s) => s.headers['x-api-key'] === 'test-key-not-real')).toBe(true);
   });
 
@@ -93,7 +94,9 @@ describe('RestJourneyData', () => {
     }));
     expect(await d.getIngredient('missing', {})).toBeNull();
     const p = await d.getIngredientPrice('cocoa', 90, {});
-    expect(p).toMatchObject({ symbol: 'COCOA', current: { price: 8123.4, change_pct: -2.1 }, history: [{ date: '2026-08-01', price: 8300 }] });
+    expect(p).toMatchObject({ symbol: 'COCOA', unit: 'index', base: 100, current: { index: 97.9, change_pct: -2.1 }, history: [{ date: '2026-08-01', index: 100 }] });
+    expect(JSON.stringify(p)).not.toContain('8123.4');
+    expect(JSON.stringify(p)).not.toContain('8300');
     expect(await d.getIngredientPrice('saffron', 90, {})).toBeNull();
   });
 
@@ -218,22 +221,47 @@ describe('RestJourneyData', () => {
     expect(q.get('search')).toBeNull();
   });
 
-  it('maps price forecasts and lists series without prices', async () => {
+  it('maps price forecasts to a base-100 index and lists series without raw prices', async () => {
     const d = new RestJourneyData(loadConfig(env), silentLogger, mockFetch({
       'price.example.test/api/v1/commodities': { data: [{ symbol: 'COCOA', name: 'Cocoa', unit: 'USD/mt', currency: 'USD', category: 'softs', price: 8000 }] },
-      'price.example.test/api/v1/commodities/COCOA/forecast': { published: true, horizonUnit: 'month', model: 'ets', beatsNaiveByPct: 9.5, data: [{ date: '2026-11-01', p10: 1, p50: 2, p90: 3 }] },
+      'price.example.test/api/v1/commodities/COCOA/history': { data: [{ date: '2026-08-01', price: 100 }] },
+      'price.example.test/api/v1/commodities/COCOA/forecast': { published: true, horizonUnit: 'month', model: 'ets', beatsNaiveByPct: 9.5, price: 8123.4, data: [{ date: '2026-11-01', p10: 90, p50: 100, p90: 110, price: 9000 }] },
     }));
     const list = await d.listPriceSeries({});
     expect(list[0]).toEqual({ symbol: 'COCOA', name: 'Cocoa', category: 'softs', unit: 'USD/mt', currency: 'USD' });
+    expect(JSON.stringify(list)).not.toContain('8000');
     const f = await d.getPriceForecast('COCOA', 90, {});
-    expect(f).toMatchObject({ published: true, beats_naive_by_pct: 9.5, points: [{ date: '2026-11-01', p50: 2 }] });
+    expect(f).toMatchObject({ published: true, base: 100, unit: 'index', beats_naive_by_pct: 9.5, points: [{ date: '2026-11-01', p10: 90, p50: 100, p90: 110 }] });
+    expect(JSON.stringify(f)).not.toContain('8123.4');
+    expect(JSON.stringify(f)).not.toContain('9000');
+  });
+
+  it('drops forecast ranges that cannot be scaled onto an index', async () => {
+    const d = new RestJourneyData(loadConfig(env), silentLogger, mockFetch({
+      'price.example.test/api/v1/commodities/COCOA/forecast': { published: true, data: [{ date: '2026-11-01', p10: 7000, p50: 8000, p90: 9000 }] },
+    }));
+    const f = await d.getPriceForecast('COCOA', 90, {});
+    expect(f?.points).toEqual([]);
+    expect(JSON.stringify(f)).not.toContain('8000');
+  });
+
+  it('keeps an upstream index and ignores a raw level on the same payload', async () => {
+    const d = new RestJourneyData(loadConfig(env), silentLogger, mockFetch({
+      'price.example.test/api/v1/commodities': { data: [{ symbol: 'COCOA', name: 'Cocoa' }] },
+      'price.example.test/api/v1/commodities/COCOA/quote': { data: { idx: 104.2, price: 9000, date: '2026-09-01' } },
+      'price.example.test/api/v1/commodities/COCOA/history': { data: [{ date: '2026-08-01', idx: 100, price: 8600 }, { date: '2026-09-01', idx: 104.2, price: 9000 }] },
+    }));
+    const p = await d.getIngredientPrice('cocoa', 90, {});
+    expect(p).toMatchObject({ base: 100, current: { index: 104.2 }, history: [{ date: '2026-08-01', index: 100 }, { date: '2026-09-01', index: 104.2 }] });
+    expect(JSON.stringify(p)).not.toContain('9000');
+    expect(JSON.stringify(p)).not.toContain('8600');
   });
 
   it('calls the app API with the user session only, never an API key', async () => {
     const seen: Seen[] = [];
     const d = new RestJourneyData(loadConfig(env), silentLogger, mockFetch({
       'app.example.test/api/v1/product/product-list': { code: 200, data: { data: [{ _id: 'a'.repeat(24), name: 'Bar', status: 'active' }], page: 1, limit: 10, total: 1 } },
-      ['app.example.test/api/v1/product/product-detail/' + 'a'.repeat(24)]: { data: { name: 'Bar', ingredients: [{ name: 'oats' }], nutrition: { protein: 5 }, 'Serving Size': 40, unitServingSize: 'g' } },
+      ['app.example.test/api/v1/product/product-detail/' + 'a'.repeat(24)]: { data: { name: 'Bar', price: 12.99, ingredients: [{ name: 'oats', price: 3 }], nutrition: { protein: 5, price: 1 }, 'Serving Size': 40, unitServingSize: 'g' } },
     }, seen));
     await expect(d.searchProducts({ page: 1, limit: 10 }, {})).rejects.toMatchObject({ code: 'not_connected' });
     const r = await d.searchProducts({ query: 'bar', page: 1, limit: 10 }, { appToken: 'tok' });
@@ -241,6 +269,8 @@ describe('RestJourneyData', () => {
     expect(seen[0].headers.Authorization).toBe('Bearer tok');
     expect(seen[0].headers['x-api-key']).toBeUndefined();
     const p = await d.getProduct('a'.repeat(24), { appToken: 'tok' });
-    expect(p).toMatchObject({ name: 'Bar', serving_size: 40, serving_size_unit: 'g', nutrition: { protein: 5 } });
+    expect(p).toMatchObject({ name: 'Bar', serving_size: 40, serving_size_unit: 'g', nutrition: { protein: 5 }, ingredients: [{ name: 'oats' }] });
+    expect(JSON.stringify(p)).not.toContain('12.99');
+    expect(JSON.stringify(p)).not.toMatch(/"price"/);
   });
 });

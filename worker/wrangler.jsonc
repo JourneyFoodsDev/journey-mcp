@@ -1,29 +1,100 @@
 {
-  // Hosted Journey AI MCP Worker (mcp.journeyfoods.io).
-  // A deploy from this file replaces the Worker's bindings. Main did not have this
-  // file; the live Worker was deployed from a local branch that bound the supplier
-  // service key. Keep that binding so a deploy does not drop it.
-  // Confirm the Worker name matches production before deploying. Do not deploy from CI.
+  // Bindings match the live journey-mcp Worker (read-only settings, Nov 2 2026).
+  // A deploy from this file keeps every binding and secret below. Do not remove one
+  // without checking the live Worker. Worker name must stay journey-mcp: the sqlite
+  // namespaces are journey-mcp_JourneyMcp and journey-mcp_AccountLedger.
+  // The script in this repo is not the journey-nodejs mcp/ build. JourneyMcp and
+  // AccountLedger are exported so those namespaces are not deleted. They do not
+  // wipe sqlite storage.
+  //
+  // Atlas outage Nov 2 2026 — revert to Cloud Run / devapi when Atlas is back
+  // (values in mcp_rollback_vars.json):
+  //   JOURNEY_API_BASE     -> https://journeyfoods-api-prod-17792015607.us-central1.run.app
+  //   JOURNEY_DEV_API_BASE -> https://devapi.journeyfoods.io
+  //   JOURNEY_PRICE_API_BASE stays https://price.journeyfoods.io
+  // worker/index.ts maps these live names onto JOURNEY_API_BASE_URL,
+  // JOURNEY_SUPPLIER_API_BASE_URL, JOURNEY_APP_API_BASE_URL, and JOURNEY_PRICE_API_BASE_URL.
+  // Do not deploy from CI. Confirm the Worker name before deploying.
+  // Custom domain mcp.journeyfoods.io is a Workers domain, not a route on the script.
+  // This file does not set routes, so deploy does not remove that domain.
   "name": "journey-mcp",
   "main": "index.ts",
-  "compatibility_date": "2026-10-20",
-  "compatibility_flags": ["nodejs_compat"],
+  // Live compatibility date. nodejs_compat is required: the Worker imports node:crypto
+  // and node:fs through the runtime. global_fetch_strictly_public matches live.
+  "compatibility_date": "2026-10-16",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": {
     "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
     "traces": {
-      "enabled": true
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1
     }
   },
+  "vars": {
+    "JOURNEY_API_BASE": "https://journey-fallback.journeyfoods.workers.dev/x/mcp",
+    "JOURNEY_APP_URL": "https://app.journeyfoods.io",
+    "JOURNEY_DEV_API_BASE": "https://journey-fallback.journeyfoods.workers.dev/x/devapi",
+    "JOURNEY_PRICE_API_BASE": "https://price.journeyfoods.io",
+    "MCP_RESOURCE": "https://mcp.journeyfoods.io/mcp"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "fbc5a846390a4654a4b59bcf5d5dcc1e"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "ACCOUNT_LEDGER", "class_name": "AccountLedger" },
+      { "name": "MCP_OBJECT", "class_name": "JourneyMcp" }
+    ]
+  },
+  // Existing sqlite namespaces (use_sqlite true). exports keeps them; it does not create new ones.
+  // migrations is omitted on purpose: the historical tags are not in this repo, and a new
+  // new_sqlite_classes tag would fail because the classes already exist.
+  "exports": {
+    "AccountLedger": { "type": "durable-object", "storage": "sqlite" },
+    "JourneyMcp": { "type": "durable-object", "storage": "sqlite" }
+  },
+  "analytics_engine_datasets": [
+    {
+      "binding": "USAGE_EVENTS",
+      "dataset": "journey_mcp_usage"
+    }
+  ],
   "secrets_store_secrets": [
     {
-      "binding": "JOURNEY_SUPPLIER_API_KEY",
-      "store_id": "default_secrets_store",
-      "secret_name": "JOURNEY_SUPPLIER_KEY_MCP"
+      "binding": "FIREBASE_WEB_API_KEY",
+      "store_id": "7a5116d7ce5d482e8e8cec9e2554c765",
+      "secret_name": "FIREBASE_WEB_API_KEY"
     },
     {
       "binding": "JOURNEY_END_USER_SIGNING_SECRET",
-      "store_id": "default_secrets_store",
+      "store_id": "7a5116d7ce5d482e8e8cec9e2554c765",
       "secret_name": "JOURNEY_END_USER_SIGNING_SECRET"
+    },
+    {
+      "binding": "JOURNEY_PRICE_API_KEY",
+      "store_id": "7a5116d7ce5d482e8e8cec9e2554c765",
+      "secret_name": "JOURNEY_PRICE_API_KEY"
+    },
+    {
+      "binding": "JOURNEY_SUPPLIER_API_KEY",
+      "store_id": "7a5116d7ce5d482e8e8cec9e2554c765",
+      "secret_name": "JOURNEY_SUPPLIER_KEY_MCP"
+    },
+    {
+      "binding": "SESSION_SECRET",
+      "store_id": "7a5116d7ce5d482e8e8cec9e2554c765",
+      "secret_name": "JOURNEY_MCP_SESSION_SECRET"
     }
   ]
 }
