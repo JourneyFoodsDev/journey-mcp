@@ -22,12 +22,29 @@ describe('hosted worker', () => {
     expect(cfg.supplierApiKey).toBeUndefined();
     expect(cfg.endUserSigningSecret).toBe('signing-from-store');
     expect(cfg.priceAccountBaseUrl).toBe('https://price.example.test');
+    expect(cfg.priceApiKey).toBeUndefined();
+    expect(cfg.apiKey).toBeUndefined();
     const missing = await loadWorkerConfig({ JOURNEY_END_USER_SIGNING_SECRET: { async get() { throw new Error('not bound'); } } });
     expect(missing.endUserSigningSecret).toBeUndefined();
     expect(missing.apiBaseUrl).toBe(FALLBACK_DEV_API_BASE);
     expect(missing.supplierApiBaseUrl).toBe(FALLBACK_MCP_API_BASE);
     expect(missing.appApiBaseUrl).toBe(FALLBACK_MCP_API_BASE);
     expect(missing.priceApiBaseUrl).toBe(DEFAULT_PRICE_API_BASE_URL);
+  });
+
+  it('reads JOURNEY_PRICE_API_KEY from the Secrets Store the same way as the supplier key', async () => {
+    const cfg = await loadWorkerConfig({
+      JOURNEY_PRICE_API_BASE: 'https://price.journeyfoods.io',
+      JOURNEY_PRICE_API_KEY: { async get() { return 'price-from-store'; } },
+      JOURNEY_SUPPLIER_API_KEY: { async get() { return 'supplier-from-store'; } },
+    });
+    expect(cfg.priceApiKey).toBe('price-from-store');
+    expect(cfg.priceApiBaseUrl).toBe('https://price.journeyfoods.io');
+    expect(cfg.supplierServiceKey).toBe('supplier-from-store');
+    expect(cfg.apiKey).toBeUndefined();
+    expect(cfg.supplierApiKey).toBeUndefined();
+    const fromEnv = await loadWorkerConfig({ JOURNEY_PRICE_API_KEY: 'price-from-env' });
+    expect(fromEnv.priceApiKey).toBe('price-from-env');
   });
 
   it('maps the live Worker binding names onto this repo and does not override an explicit rollback URL', async () => {

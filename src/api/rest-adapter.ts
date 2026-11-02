@@ -159,23 +159,45 @@ export class RestJourneyData implements JourneyData {
     return normalizeSupplier(row as Record<string, unknown>);
   }
 
+  /**
+   * Developer API key for ingredient calls.
+   * The fallback devapi route accepts only the `x-api-key` header, and only when
+   * SHA-256(key) is an active row in dev_keys. A price-feed key is not that credential.
+   * `/x/mcp` supplier profiles do not check this header, so the same caller key can
+   * succeed there and still be rejected here.
+   */
+  private devApiKey(cred: Credential): string | undefined {
+    const caller = cred.apiKey;
+    if (caller && caller !== this.cfg.priceApiKey) return caller;
+    return this.cfg.apiKey;
+  }
+
+  private devHeaders(cred: Credential): Record<string, string> {
+    const headers = this.endUserHeaders(cred);
+    const key = this.devApiKey(cred);
+    // Set the header here so a bearer on the same call cannot drop it. The fallback
+    // ingredient routes do not read Authorization.
+    if (key) headers['x-api-key'] = key;
+    return headers;
+  }
+
   async searchIngredients(q: string, limit: number, cred: Credential): Promise<Ingredient[]> {
-    const payload = await this.dev.request(ENDPOINTS.ingredientSearch, { query: { q }, apiKey: cred.apiKey, headers: this.endUserHeaders(cred) });
+    const payload = await this.dev.request(ENDPOINTS.ingredientSearch, { query: { q }, apiKey: this.devApiKey(cred), headers: this.devHeaders(cred) });
     const rows = unwrap(payload);
     if (!Array.isArray(rows)) throw new UpstreamError('Ingredient search returned an unexpected shape.', 502, ENDPOINTS.ingredientSearch);
     return rows.slice(0, limit).map((r) => normalizeIngredient(r as Record<string, unknown>));
   }
 
   async getIngredient(id: string, cred: Credential): Promise<Ingredient | null> {
-    const headers = this.endUserHeaders(cred);
-    const payload = await this.dev.request(ENDPOINTS.ingredientById(id), { apiKey: cred.apiKey, headers });
+    const headers = this.devHeaders(cred);
+    const payload = await this.dev.request(ENDPOINTS.ingredientById(id), { apiKey: this.devApiKey(cred), headers });
     if (!payload) return null;
     const row = unwrap(payload) as Record<string, unknown>;
     const base = normalizeIngredient(row);
     // Optional enrichments. Plan-gated upstream; a failure here does not fail the profile.
     const [nut, all] = await Promise.allSettled([
-      this.dev.request(ENDPOINTS.nutrientsById(id), { apiKey: cred.apiKey, headers }),
-      this.dev.request(ENDPOINTS.allergensById(id), { apiKey: cred.apiKey, headers }),
+      this.dev.request(ENDPOINTS.nutrientsById(id), { apiKey: this.devApiKey(cred), headers }),
+      this.dev.request(ENDPOINTS.allergensById(id), { apiKey: this.devApiKey(cred), headers }),
     ]);
     if (nut.status === 'fulfilled' && nut.value) {
       const n = unwrap(nut.value) as Record<string, unknown>;
@@ -315,7 +337,7 @@ export class RestJourneyData implements JourneyData {
   available(feature: 'ingredients' | 'labs' | 'products' | 'prices' | 'suppliers', cred: Credential): boolean {
     switch (feature) {
       case 'ingredients':
-        return Boolean(this.cfg.apiBaseUrl && (cred.apiKey || this.cfg.apiKey));
+        return Boolean(this.cfg.apiBaseUrl && this.devApiKey(cred));
       case 'labs':
         return Boolean(this.cfg.labsVerifyPath && this.cfg.labsApiBaseUrl);
       case 'products':
