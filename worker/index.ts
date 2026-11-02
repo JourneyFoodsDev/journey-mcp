@@ -62,9 +62,12 @@ export async function loadWorkerConfig(env: WorkerEnv) {
   const supplier = await readSecretBinding(env.JOURNEY_SUPPLIER_API_KEY);
   // Missing signing secret: leave it unset so backend calls omit the end-user headers instead of 401ing.
   const signing = await readSecretBinding(env.JOURNEY_END_USER_SIGNING_SECRET, { optional: true });
+  // Same Secrets Store get() as the supplier key. A string env value is accepted too.
+  const priceKey = await readSecretBinding(env.JOURNEY_PRICE_API_KEY);
   if (supplier) proc.JOURNEY_SUPPLIER_API_KEY = supplier;
   if (signing) proc.JOURNEY_END_USER_SIGNING_SECRET = signing;
   else delete proc.JOURNEY_END_USER_SIGNING_SECRET;
+  if (priceKey) proc.JOURNEY_PRICE_API_KEY = priceKey;
   return loadConfig(proc);
 }
 

@@ -79,6 +79,28 @@ describe('RestJourneyData', () => {
     expect(seen.every((s) => s.headers['x-api-key'] === 'test-key-not-real')).toBe(true);
   });
 
+  it('sends the caller key as x-api-key to the fallback devapi and does not send a price key there', async () => {
+    const seen: Seen[] = [];
+    const d = new RestJourneyData(loadConfig({
+      JOURNEY_API_BASE_URL: 'https://journey-fallback.journeyfoods.workers.dev/x/devapi',
+      JOURNEY_API_KEY: 'server-dev-key',
+      JOURNEY_PRICE_API_KEY: 'price-from-store',
+      JOURNEY_PRICE_API_BASE_URL: 'https://price.journeyfoods.io',
+      JOURNEY_SUPPLIER_API_BASE_URL: 'https://journey-fallback.journeyfoods.workers.dev/x/mcp',
+      JOURNEY_SUPPLIER_API_KEY: 'supplier-from-store',
+    }), silentLogger, mockFetch({
+      'journey-fallback.journeyfoods.workers.dev/x/devapi/ingredients/search': [{ id: 'o1', name: 'Oat' }],
+    }, seen));
+    await d.searchIngredients('oat', 5, { apiKey: 'caller-dev-key' });
+    expect(seen[0].url.href.startsWith('https://journey-fallback.journeyfoods.workers.dev/x/devapi/ingredients/search')).toBe(true);
+    expect(seen[0].headers['x-api-key']).toBe('caller-dev-key');
+    expect(seen[0].headers['x-journey-service-key']).toBeUndefined();
+    expect(JSON.stringify(seen[0].headers)).not.toContain('price-from-store');
+    seen.length = 0;
+    await d.searchIngredients('oat', 5, { apiKey: 'price-from-store' });
+    expect(seen[0].headers['x-api-key']).toBe('server-dev-key');
+  });
+
   it('forwards the caller key when the caller authenticated with their own key', async () => {
     const seen: Seen[] = [];
     const d = new RestJourneyData(loadConfig(env), silentLogger, mockFetch({ 'dev.example.test/ingredients/search': [{ id: 'm1', name: 'Mango' }] }, seen));
