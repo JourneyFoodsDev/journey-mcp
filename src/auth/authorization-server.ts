@@ -7,7 +7,7 @@ import { JwtVerifier, type TokenVerifier } from './oauth.js';
 const ACCESS_TTL_SEC = 60 * 60;
 const REFRESH_TTL_SEC = 14 * 24 * 60 * 60;
 const CODE_TTL_MS = 60_000;
-const SUPPORTED_SCOPES = ['journey:read', 'openid', 'profile'];
+const SUPPORTED_SCOPES = ['journey:read', 'catalog:read', 'profile:read', 'openid', 'profile', 'offline_access'];
 
 export interface IdentityRequest {
   redirectUri: string;
@@ -338,6 +338,7 @@ export class AuthorizationServer {
     if (account.role) claims.journey_role = account.role;
     if (account.displayName) claims.name = account.displayName;
     if (account.email) claims.email = account.email;
+    if (account.fullCatalogAccess) Object.assign(claims, { 'https://journeyfoods.io/full_catalog': true });
     const access = await new SignJWT(claims)
       .setProtectedHeader({ alg: 'ES256', kid: key.publicJwk.kid })
       .setIssuer(this.metadata().issuer)

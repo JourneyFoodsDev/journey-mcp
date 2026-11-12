@@ -1,7 +1,31 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { AuthError } from '../errors.js';
 import type { JourneyConfig } from '../config.js';
 import type { Account } from './account.js';
+
+/** Auth0 API scopes for the two ChatGPT apps. offline_access is advertised, not required. */
+export const CATALOG_SCOPE = 'catalog:read';
+export const PROFILE_SCOPE = 'profile:read';
+export const APP_OAUTH_SCOPES = [CATALOG_SCOPE, PROFILE_SCOPE, 'offline_access'] as const;
+/**
+ * Set by an Auth0 Action from Journey subscription data. A boolean true grants
+ * full search. Anything else, including a missing claim, keeps the 4-result gate.
+ */
+export const FULL_CATALOG_CLAIM = 'https://journeyfoods.io/full_catalog';
+
+export function isAppResource(resource: string): boolean {
+  try {
+    const path = new URL(resource).pathname;
+    return path === '/apps/journey-foods/mcp' || path === '/apps/guava/mcp';
+  } catch {
+    return false;
+  }
+}
+
+export function scopeForTool(tool: string): string {
+  return tool === 'get_profile' ? PROFILE_SCOPE : CATALOG_SCOPE;
+}
 
 /**
  * OAuth 2.1 resource-server side of the MCP authorization spec (2025-11-25):
@@ -28,13 +52,24 @@ function claim(p: Record<string, unknown>, keys: string[]): string | undefined {
   return undefined;
 }
 
-function toAccount(p: Record<string, unknown>, cfg: JourneyConfig['oauth']): Account {
+function truthyClaim(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
+function toAccount(p: Record<string, unknown>, cfg: JourneyConfig['oauth'], resource?: string): Account {
   const userId = claim(p, [cfg.userClaim, 'journey_user_id', 'user_id', 'sub']);
   const companyId = claim(p, [cfg.companyClaim, 'journey_company_id', 'company_id', cfg.accountClaim]);
   const id = companyId ?? userId ?? claim(p, [cfg.accountClaim, 'sub']);
   if (!id) throw new AuthError('Access token has no Journey account.');
   const scopes = scopesOf(p);
-  if (cfg.requiredScope && !scopes.includes(cfg.requiredScope)) throw new AuthError(`Access token is missing the ${cfg.requiredScope} scope.`, 'insufficient_scope');
+  const app = resource ? isAppResource(resource) : false;
+  if (app) {
+    if (!scopes.includes(CATALOG_SCOPE) && !scopes.includes(PROFILE_SCOPE)) {
+      throw new AuthError(`Access token is missing the ${CATALOG_SCOPE} or ${PROFILE_SCOPE} scope.`, 'insufficient_scope');
+    }
+  } else if (cfg.requiredScope && !scopes.includes(cfg.requiredScope)) {
+    throw new AuthError(`Access token is missing the ${cfg.requiredScope} scope.`, 'insufficient_scope');
+  }
   const tier = claim(p, [cfg.tierClaim]) ?? null;
   const status = claim(p, [cfg.statusClaim, 'journey_status', 'subscription_status', 'status']) ?? null;
   const role = claim(p, [cfg.roleClaim, 'journey_role', 'role']) ?? null;
@@ -54,6 +89,16 @@ function toAccount(p: Record<string, unknown>, cfg: JourneyConfig['oauth']): Acc
     contractLimits: limits,
     ...(displayName ? { displayName } : {}),
     ...(email ? { email } : {}),
+    fullCatalogAccess: truthyClaim(p[FULL_CATALOG_CLAIM]),
+  };
+}
+
+export function missingScopeResult(metadataUrl: string, scope: string): CallToolResult {
+  const challenge = `Bearer resource_metadata="${metadataUrl}", scope="${scope}", error="insufficient_scope", error_description="The access token is missing the ${scope} scope"`;
+  return {
+    isError: true,
+    content: [{ type: 'text', text: `The access token is missing the ${scope} scope.` }],
+    _meta: { 'mcp/www_authenticate': [`'${challenge}'`] },
   };
 }
 
@@ -64,13 +109,19 @@ export class JwtVerifier implements TokenVerifier {
     this.jwks = jwks ?? createRemoteJWKSet(new URL(cfg.jwksUrl!));
   }
   async verify(token: string, audience?: string | string[]): Promise<Account> {
+    const expected = audience ?? this.resource;
     let payload: JWTPayload;
     try {
-      ({ payload } = await jwtVerify(token, this.jwks as never, { issuer: this.cfg.issuer, audience: audience ?? this.resource }));
+      ({ payload } = await jwtVerify(token, this.jwks as never, {
+        issuer: this.cfg.issuer,
+        audience: expected,
+        ...(this.cfg.algorithms?.length ? { algorithms: this.cfg.algorithms } : {}),
+      }));
     } catch (e) {
       throw new AuthError(`Access token rejected: ${(e as Error).message}`);
     }
-    return toAccount(payload as Record<string, unknown>, this.cfg);
+    const resource = typeof expected === 'string' ? expected : expected[0];
+    return toAccount(payload as Record<string, unknown>, this.cfg, resource);
   }
 }
 
@@ -91,7 +142,7 @@ export class IntrospectionVerifier implements TokenVerifier {
     const expected = audience ?? this.resource;
     if (!auds.map(norm).includes(norm(expected))) throw new AuthError('Access token was not issued for this MCP server.');
     if (this.cfg.issuer && body.iss && body.iss !== this.cfg.issuer) throw new AuthError('Access token issuer is not trusted.');
-    return toAccount(body, this.cfg);
+    return toAccount(body, this.cfg, expected);
   }
 }
 
@@ -102,13 +153,13 @@ export function createTokenVerifier(cfg: JourneyConfig): TokenVerifier | undefin
 }
 
 /** RFC 9728 protected resource metadata served at /.well-known/oauth-protected-resource[/mcp]. */
-export function protectedResourceMetadata(cfg: JourneyConfig, over: { resource?: string; name?: string; documentation?: string } = {}) {
+export function protectedResourceMetadata(cfg: JourneyConfig, over: { resource?: string; name?: string; documentation?: string; scopes?: readonly string[] } = {}) {
   const resource = over.resource ?? cfg.resourceUrl;
   const origin = new URL(resource).origin;
   return {
     resource,
     authorization_servers: cfg.oauth.issuer ? [cfg.oauth.issuer] : [origin],
-    scopes_supported: [cfg.oauth.requiredScope],
+    scopes_supported: [...(over.scopes ?? [cfg.oauth.requiredScope])],
     bearer_methods_supported: ['header'],
     resource_name: over.name ?? 'Journey',
     resource_documentation: over.documentation ?? 'https://www.journeyfoods.io/mcp',

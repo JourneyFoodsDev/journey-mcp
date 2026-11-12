@@ -92,7 +92,8 @@ describe('hosted worker', () => {
     expect(search?._meta?.ui?.resourceUri).toBe('ui://journey/result-list.html');
     expect(search?._meta?.securitySchemes?.map((scheme) => scheme.type).sort()).toEqual(['noauth', 'oauth2']);
     const profile = tools.find((tool) => tool.name === 'get_profile');
-    expect(profile?._meta?.securitySchemes).toEqual([{ type: 'oauth2', scopes: ['journey:read'] }]);
+    expect(profile?._meta?.securitySchemes).toEqual([{ type: 'oauth2', scopes: ['profile:read'] }]);
+    expect(search?._meta?.securitySchemes).toEqual([{ type: 'noauth' }, { type: 'oauth2', scopes: ['catalog:read'] }]);
     expect(profile?._meta).toMatchObject({ 'openai/profile': true });
     const denied = await worker.fetch(new Request('https://mcp.journeyfoods.io/mcp', { method: 'POST', headers, body: '{}' }), {});
     expect(denied.status).toBe(401);

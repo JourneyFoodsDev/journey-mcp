@@ -18,12 +18,13 @@ const FULL_ACCESS_TIERS = new Set(['fresh', 'startup', 'enterprise']);
 const ACTIVE_STATUS = new Set(['active', 'trialing']);
 
 /**
- * Full search results require a signed-in account whose plan already includes catalog access.
- * A missing status does not block a paid tier: API-key lookups often omit it.
- * A present status must be active or trialing. Canceled and past-due accounts stay on the preview.
+ * Full search results require a subscription signal.
+ * OAuth (Auth0) grants it only when https://journeyfoods.io/full_catalog is true.
+ * A signed-in token without that claim stays on the 4-result gate. API keys still use the account tier.
  */
 export function hasFullSearch(account: Account): boolean {
   if (account.authMethod === 'anonymous') return false;
+  if (account.authMethod === 'oauth') return account.fullCatalogAccess === true;
   const tier = resolveTier(DEFAULT_POLICY, account.tier);
   if (!FULL_ACCESS_TIERS.has(tier)) return false;
   const status = account.status?.trim().toLowerCase();

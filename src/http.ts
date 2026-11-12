@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { JourneyConfig } from './config.js';
 import type { Logger } from './logger.js';
 import { AuthError, JourneyError } from './errors.js';
-import type { TokenVerifier } from './auth/oauth.js';
+import { isAppResource, type TokenVerifier } from './auth/oauth.js';
 import type { ApiKeyResolver } from './auth/api-key.js';
 import { anonymousAccount, type Account } from './auth/account.js';
 import type { JourneyData } from './api/types.js';
@@ -121,7 +121,7 @@ export function createHttpApp(deps: HttpDeps) {
   });
 
   const challenge = (res: Response, err: AuthError, resource: string) => {
-    const scope = cfg.oauth.requiredScope;
+    const scope = isAppResource(resource) ? 'catalog:read' : cfg.oauth.requiredScope;
     const errCode = err.code === 'insufficient_scope' ? 'insufficient_scope' : 'invalid_token';
     res
       .status(err.code === 'insufficient_scope' ? 403 : 401)

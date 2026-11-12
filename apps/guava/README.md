@@ -6,8 +6,10 @@ Same origin as the existing Journey server: `https://mcp.journeyfoods.io`. Submi
 
 Humans still need to do the following. This repository does not deploy, change DNS, or store secrets.
 
-1. Choose the identity provider (see the Journey Foods checklist). Set `OAUTH_ISSUER` and `OAUTH_JWKS_URL`. The builtin authorization server refuses login until that provider is connected, and it is not a reviewer demo by itself.
+1. Auth0 is the identity provider, same tenant as Journey Foods. This app's audience is `https://mcp.journeyfoods.io/apps/guava/mcp`. A token for the Journey Foods audience is rejected here. Scopes are `catalog:read` and `profile:read`. Full search needs the Auth0 Action claim `https://journeyfoods.io/full_catalog` set to true. Without it, signed-in callers still get 4 results. See the Journey Foods checklist for the tenant and the Action.
 2. Deploy the Worker so the `GUAVA_D1` binding is attached. That database is `journey-fallback-guava` (`1edc14fd-bfec-4897-85d9-b9bd630d7dd9`), the snapshot `guava-catalog-sync` writes. There is no separate public Guava API today. After deploy, search and product detail are `https://mcp.journeyfoods.io/apps/guava/v1/products`. The stored `guavaScore` is null on current rows, so the tool omits it instead of calculating one. Nutrition score and price are returned only when the snapshot has them.
+
+Open data issue: the CEO expects Guava to hold about 6 million products. `journey-fallback-guava` currently has 488,044 products in `guava_p` and in `docs`. This app reads that snapshot as it is. The gap is not fixed here.
 3. Deploy the Worker yourself. Do not change the scheme or host.
 4. Add a logo you have rights to use (`logo_url`).
 5. Publish privacy, terms, and support URLs and paste them into the portal and `plugin.json`. Privacy copy should say that product lookup returns catalog fields, and that `get_profile` returns an opaque id plus name or email only when the identity provider sends them.

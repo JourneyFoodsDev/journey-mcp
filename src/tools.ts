@@ -5,6 +5,7 @@ import { DEV_API_KEY_URL, HOSTED_MCP_URL, PRICE_API_KEY_URL } from './config.js'
 import { JourneyError, NotConnectedError } from './errors.js';
 import type { GuavaCatalog } from './apps/guava-catalog.js';
 import { PUBLIC_AUTH } from './apps/definitions.js';
+import { CATALOG_SCOPE, PROFILE_SCOPE, missingScopeResult } from './auth/oauth.js';
 import { applyPreview, directoryAccessMessage, joinNotice, limitNotice, previewQuery } from './policy/search-gate.js';
 import type { Enforcer } from './policy/enforcer.js';
 import type { Logger } from './logger.js';
@@ -181,6 +182,10 @@ function run<A>(ctx: ToolContext, tool: string, fn: (args: A, ctx: ToolContext) 
     const live = forCall(ctx);
     const t = tallying(live);
     try {
+      if (ctx.directory && ctx.account.authMethod === 'oauth') {
+        const scope = tool === 'get_profile' ? PROFILE_SCOPE : CATALOG_SCOPE;
+        if (!ctx.account.scopes.includes(scope)) return missingScopeResult(ctx.resourceMetadataUrl ?? '', scope);
+      }
       await live.enforcer.checkRate(live.account);
       const result = await fn(args, t.call);
       ctx.log.info('tool call', { tool, account: ctx.account.id, tier: ctx.account.tier ?? 'default', auth: ctx.account.authMethod, ms: Date.now() - started, outcome: result.isError ? 'error' : 'ok' });

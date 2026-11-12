@@ -38,6 +38,7 @@ const subscriber: Account = {
   companyId: 'co-1',
   displayName: 'Fixture User',
   email: 'fixture@example.test',
+  fullCatalogAccess: true,
 };
 
 function pkce() {
@@ -226,7 +227,7 @@ describe('OAuth 2.1 PKCE and mixed auth', () => {
       code_challenge_method: 'S256',
       resource,
       state: 'state-1',
-      scope: 'journey:read openid profile',
+      scope: 'catalog:read profile:read offline_access',
     });
     expect(auth.status).toBe(302);
     const location = new URL(auth.headers.location);
@@ -255,7 +256,7 @@ describe('OAuth 2.1 PKCE and mixed auth', () => {
 
   it('publishes protected-resource metadata, S256, and the challenge token', async () => {
     const prm = await request(app).get('/.well-known/oauth-protected-resource/apps/journey-foods/mcp');
-    expect(prm.body).toMatchObject({ resource: RESOURCE, authorization_servers: [ORIGIN], resource_name: 'Journey Foods', scopes_supported: ['journey:read'] });
+    expect(prm.body).toMatchObject({ resource: RESOURCE, authorization_servers: [ORIGIN], resource_name: 'Journey Foods', scopes_supported: ['catalog:read', 'profile:read', 'offline_access'] });
     const guava = await request(app).get('/.well-known/oauth-protected-resource/apps/guava/mcp');
     expect(guava.body.resource_name).toBe('Guava by Journey');
     const as = await request(app).get('/.well-known/oauth-authorization-server');

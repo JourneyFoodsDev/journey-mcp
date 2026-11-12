@@ -31,7 +31,7 @@ Two directory apps are separate endpoints on the same host. Submit each on its o
 - Journey Foods (CPG lookup): `https://mcp.journeyfoods.io/apps/journey-foods/mcp`
 - Guava by Journey (product lookup): `https://mcp.journeyfoods.io/apps/guava/mcp`
 
-Submission notes, reviewer prompts, and the human checklist are in [`apps/journey-foods`](apps/journey-foods) and [`apps/guava`](apps/guava). Searches return at most 4 results unless the caller is signed in with full catalog access. The Guava catalog is the D1 snapshot written by `guava-catalog-sync`. It is served from this host at `/apps/guava/v1/products` once the `GUAVA_D1` binding is deployed. OAuth 2.1 with PKCE S256 is advertised from the host. An identity provider, logos, legal URLs, a reviewer demo account, and a deploy are still required before directory review. See those READMEs.
+Submission notes, reviewer prompts, and the human checklist are in [`apps/journey-foods`](apps/journey-foods) and [`apps/guava`](apps/guava). Searches return at most 4 results unless the caller is signed in with full catalog access. The Guava catalog is the D1 snapshot written by `guava-catalog-sync`. It is served from this host at `/apps/guava/v1/products` once the `GUAVA_D1` binding is deployed. OAuth 2.1 uses the Auth0 tenant `dev-ssk71qghv0z5qp7s.us.auth0.com`. Each app checks that tenant, its own audience, and `catalog:read` or `profile:read`. Full search needs the claim `https://journeyfoods.io/full_catalog`. Logos, legal URLs, a reviewer demo account, that claim, and a deploy are still required before directory review. See those READMEs.
 
 ### Cursor
 Add [`examples/cursor-mcp.json`](examples/cursor-mcp.json) to `.cursor/mcp.json` (hosted). For local use, use the `npx` block from the Claude Desktop example.

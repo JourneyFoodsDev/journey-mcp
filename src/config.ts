@@ -34,6 +34,8 @@ export interface JourneyConfig {
     introspectionClientId?: string;
     introspectionClientSecret?: string;
     requiredScope: string;
+    /** JWT algs accepted from the authorization server. Auth0 uses RS256. Empty allows the key's alg. */
+    algorithms: string[];
     accountClaim: string;
     tierClaim: string;
     userClaim: string;
@@ -110,6 +112,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): JourneyConfig 
       introspectionClientId: blank(env.OAUTH_INTROSPECTION_CLIENT_ID),
       introspectionClientSecret: blank(env.OAUTH_INTROSPECTION_CLIENT_SECRET),
       requiredScope: blank(env.OAUTH_REQUIRED_SCOPE) ?? 'journey:read',
+      algorithms: (env.OAUTH_JWT_ALGS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       accountClaim: blank(env.OAUTH_ACCOUNT_CLAIM) ?? 'journey_account_id',
       tierClaim: blank(env.OAUTH_TIER_CLAIM) ?? 'journey_tier',
       userClaim: blank(env.OAUTH_USER_CLAIM) ?? 'journey_user_id',

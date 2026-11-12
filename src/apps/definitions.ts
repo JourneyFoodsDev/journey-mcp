@@ -1,4 +1,4 @@
-import { protectedResourceMetadata } from '../auth/oauth.js';
+import { APP_OAUTH_SCOPES, CATALOG_SCOPE, PROFILE_SCOPE, protectedResourceMetadata } from '../auth/oauth.js';
 import type { JourneyConfig } from '../config.js';
 
 /** Widget URIs. The HTML is served by the MCP server that registers the resource. */
@@ -105,10 +105,10 @@ export function metadataUrl(cfg: JourneyConfig, resource: string): string {
 /** Public catalog tools can run without a token. Account tools cannot. */
 export const PUBLIC_AUTH = [
   { type: 'noauth' },
-  { type: 'oauth2', scopes: ['journey:read'] },
+  { type: 'oauth2', scopes: [CATALOG_SCOPE] },
 ] as const;
 
-export const ACCOUNT_AUTH = [{ type: 'oauth2', scopes: ['journey:read'] }] as const;
+export const ACCOUNT_AUTH = [{ type: 'oauth2', scopes: [PROFILE_SCOPE] }] as const;
 
 export function metadataForRequestPath(cfg: JourneyConfig, path: string) {
   const prefix = '/.well-known/oauth-protected-resource';
@@ -116,5 +116,5 @@ export function metadataForRequestPath(cfg: JourneyConfig, path: string) {
   const resourcePath = rest && rest !== '/' ? (rest.startsWith('/') ? rest : `/${rest}`) : '';
   const app = resourcePath ? appForPath(resourcePath) : undefined;
   const resource = resourcePath ? `${publicOrigin(cfg.resourceUrl)}${resourcePath}` : cfg.resourceUrl;
-  return protectedResourceMetadata(cfg, { resource, name: app?.title ?? 'Journey' });
+  return protectedResourceMetadata(cfg, { resource, name: app?.title ?? 'Journey', ...(app ? { scopes: APP_OAUTH_SCOPES } : {}) });
 }

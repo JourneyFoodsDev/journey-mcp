@@ -5,7 +5,9 @@
   "auth": {
     "type": "oauth2.1",
     "pkce": "S256",
-    "scopes": ["journey:read"]
+    "scopes": ["catalog:read", "profile:read"],
+    "issuer": "https://dev-ssk71qghv0z5qp7s.us.auth0.com/",
+    "audience": "https://mcp.journeyfoods.io/apps/journey-foods/mcp"
   },
   "required_before_submission": [
     "logo_url",
