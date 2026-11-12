@@ -14,6 +14,7 @@ import { createMcpServer } from './server.js';
 import { metadataForRequestPath, metadataUrl, resourceForPath } from './apps/definitions.js';
 import { createAppServer } from './apps/server.js';
 import type { GuavaCatalog } from './apps/guava-catalog.js';
+import { queryGuavaCatalog } from './apps/guava-http.js';
 import type { AuthorizationServer } from './auth/authorization-server.js';
 
 export interface HttpDeps {
@@ -178,6 +179,32 @@ export function createHttpApp(deps: HttpDeps) {
   });
   app.options('/apps/guava/mcp', (req, res) => {
     res.status(204).set(corsHeaders(req.header('origin'), selfOrigin)).end();
+  });
+
+  const guavaCatalog = async (req: Request, res: Response) => {
+    const resource = resourceForPath(cfg, '/apps/guava/mcp');
+    let account: Account = anonymousAccount();
+    const apiKey = req.header('x-api-key')?.trim();
+    const authz = req.header('authorization');
+    try {
+      if (authz?.toLowerCase().startsWith('bearer ')) {
+        if (!deps.verifier) throw new AuthError('OAuth is not configured on this server. Use an x-api-key header.', 'oauth_not_configured');
+        account = await deps.verifier.verify(authz.slice(7).trim(), resource);
+      } else if (apiKey) account = await deps.keys.resolve(apiKey);
+    } catch (e) {
+      if (e instanceof AuthError) return challenge(res, e, resource);
+      throw e;
+    }
+    const url = new URL(req.originalUrl, selfOrigin);
+    const result = await queryGuavaCatalog({ pathname: url.pathname, searchParams: url.searchParams, catalog: deps.guava, account });
+    res.status(result?.status ?? 404).set('cache-control', 'no-store').json(result?.body ?? { error: 'not_found' });
+  };
+  app.use('/apps/guava/v1/products', (req, res, next) => {
+    if (req.method !== 'GET') {
+      res.status(405).json({ error: 'method_not_allowed' });
+      return;
+    }
+    void guavaCatalog(req, res).catch(next);
   });
 
   app.post('/mcp', authenticate(cfg.resourceUrl, false), serve('legacy'));

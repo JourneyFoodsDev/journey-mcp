@@ -7,7 +7,7 @@ Same origin as the existing Journey server: `https://mcp.journeyfoods.io`. Submi
 Humans still need to do the following. This repository does not deploy, change DNS, or store secrets.
 
 1. Choose the identity provider (see the Journey Foods checklist). Set `OAUTH_ISSUER` and `OAUTH_JWKS_URL`. The builtin authorization server refuses login until that provider is connected, and it is not a reviewer demo by itself.
-2. Set `GUAVA_API_BASE_URL` to the real Guava catalog. The adapter calls `GET /v1/products` and `GET /v1/products/:id` and copies only fields the payload contains. This repo does not know a public Guava API, so the URL is blank on purpose. With it unset, every Guava tool says the catalog is not connected.
+2. Deploy the Worker so the `GUAVA_D1` binding is attached. That database is `journey-fallback-guava` (`1edc14fd-bfec-4897-85d9-b9bd630d7dd9`), the snapshot `guava-catalog-sync` writes. There is no separate public Guava API today. After deploy, search and product detail are `https://mcp.journeyfoods.io/apps/guava/v1/products`. The stored `guavaScore` is null on current rows, so the tool omits it instead of calculating one. Nutrition score and price are returned only when the snapshot has them.
 3. Deploy the Worker yourself. Do not change the scheme or host.
 4. Add a logo you have rights to use (`logo_url`).
 5. Publish privacy, terms, and support URLs and paste them into the portal and `plugin.json`. Privacy copy should say that product lookup returns catalog fields, and that `get_profile` returns an opaque id plus name or email only when the identity provider sends them.

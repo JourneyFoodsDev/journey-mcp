@@ -9,6 +9,8 @@ import { AuthError } from '../src/errors.js';
 import { appForPath, metadataForRequestPath, metadataUrl, resourceForPath } from '../src/apps/definitions.js';
 import { createAppServer } from '../src/apps/server.js';
 import type { AppId } from '../src/apps/definitions.js';
+import { D1GuavaCatalog, type GuavaD1 } from '../src/apps/guava-d1.js';
+import { queryGuavaCatalog } from '../src/apps/guava-http.js';
 export { AccountLedger, JourneyMcp } from './durable-objects.js';
 
 /**
@@ -45,6 +47,8 @@ export interface WorkerEnv {
   SESSION_SECRET?: unknown;
   JOURNEY_SUPPLIER_API_KEY?: unknown;
   JOURNEY_END_USER_SIGNING_SECRET?: unknown;
+  /** D1 snapshot written by guava-catalog-sync. Absent until this Worker is deployed with the binding. */
+  GUAVA_D1?: GuavaD1;
   [key: string]: unknown;
 }
 
@@ -107,6 +111,18 @@ function withCors(request: Request, response: Response): Response {
   headers.set('access-control-allow-methods', 'POST, GET, OPTIONS');
   headers.set('vary', 'origin');
   return new Response(response.body, { status: response.status, headers });
+}
+
+async function accountFromRequest(request: Request, rt: Awaited<ReturnType<typeof runtime>>, resource: string, allowAnonymous: boolean) {
+  const apiKey = request.headers.get('x-api-key')?.trim();
+  const authz = request.headers.get('authorization');
+  if (authz?.toLowerCase().startsWith('bearer ')) {
+    if (!rt.verifier) throw new AuthError('OAuth is not configured on this server. Use an x-api-key header.', 'oauth_not_configured');
+    return rt.verifier.verify(authz.slice(7).trim(), resource);
+  }
+  if (apiKey) return rt.keys.resolve(apiKey);
+  if (allowAnonymous) return anonymousAccount();
+  throw new AuthError('Authentication required. Send a Journey API key in the x-api-key header.', 'missing_credentials');
 }
 
 async function readParams(request: Request): Promise<URLSearchParams> {
@@ -173,7 +189,23 @@ export default {
           journey_foods: `${url.origin}/apps/journey-foods/mcp`,
           guava: `${url.origin}/apps/guava/mcp`,
         },
+        guava_catalog: `${url.origin}/apps/guava/v1/products`,
       });
+    }
+    if (url.pathname === '/apps/guava/v1/products' || url.pathname.startsWith('/apps/guava/v1/products/')) {
+      if (request.method === 'OPTIONS') return withCors(request, new Response(null, { status: 204 }));
+      if (request.method !== 'GET') return Response.json({ error: 'method_not_allowed' }, { status: 405 });
+      const rt = await rtPromise();
+      const resource = resourceForPath(rt.cfg, '/apps/guava/mcp');
+      let account;
+      try {
+        account = await accountFromRequest(request, rt, resource, true);
+      } catch (e) {
+        return unauthorized(e instanceof AuthError ? e.message : 'Authentication failed.', metadataUrl(rt.cfg, resource));
+      }
+      const catalog = env.GUAVA_D1 ? new D1GuavaCatalog(env.GUAVA_D1) : rt.guava;
+      const result = await queryGuavaCatalog({ pathname: url.pathname, searchParams: url.searchParams, catalog, account });
+      return withCors(request, Response.json(result?.body ?? { error: 'not_found' }, { status: result?.status ?? 404, headers: { 'cache-control': 'no-store' } }));
     }
     const app = appForPath(url.pathname);
     const legacy = url.pathname === '/mcp';
@@ -184,20 +216,9 @@ export default {
     }
     const rt = await rtPromise();
     const resource = resourceForPath(rt.cfg, url.pathname);
-    const apiKey = request.headers.get('x-api-key')?.trim();
-    const authz = request.headers.get('authorization');
     let account;
     try {
-      if (authz?.toLowerCase().startsWith('bearer ')) {
-        if (!rt.verifier) return unauthorized('OAuth is not configured on this server. Use an x-api-key header.', metadataUrl(rt.cfg, resource));
-        account = await rt.verifier.verify(authz.slice(7).trim(), resource);
-      } else if (apiKey) {
-        account = await rt.keys.resolve(apiKey);
-      } else if (app) {
-        account = anonymousAccount();
-      } else {
-        return unauthorized('Authentication required. Send a Journey API key in the x-api-key header.', metadataUrl(rt.cfg, resource));
-      }
+      account = await accountFromRequest(request, rt, resource, Boolean(app));
     } catch (e) {
       return unauthorized(e instanceof AuthError ? e.message : 'Authentication failed.', metadataUrl(rt.cfg, resource));
     }
@@ -209,7 +230,7 @@ export default {
       usage: rt.usage,
       transport: 'worker' as const,
       client: () => ({ userAgent: request.headers.get('user-agent') ?? undefined }),
-      guava: rt.guava,
+      guava: env.GUAVA_D1 ? new D1GuavaCatalog(env.GUAVA_D1) : rt.guava,
     };
     const server = app ? createAppServer(app.id as AppId, base, metadataUrl(rt.cfg, resource)) : createMcpServer(base);
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

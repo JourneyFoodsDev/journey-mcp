@@ -51,6 +51,15 @@
       "id": "fbc5a846390a4654a4b59bcf5d5dcc1e"
     }
   ],
+  // Catalog snapshot written by guava-catalog-sync. The binding is unused until
+  // this Worker is deployed. This file does not deploy it.
+  "d1_databases": [
+    {
+      "binding": "GUAVA_D1",
+      "database_name": "journey-fallback-guava",
+      "database_id": "1edc14fd-bfec-4897-85d9-b9bd630d7dd9"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       { "name": "ACCOUNT_LEDGER", "class_name": "AccountLedger" },

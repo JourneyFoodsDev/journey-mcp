@@ -40,6 +40,24 @@ export interface GuavaCatalog {
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
+/** Mongo extended JSON used by the Guava D1 snapshot. Missing and JSON null stay missing. */
+export function mongoScalar(value: unknown): unknown {
+  const rec = asRecord(value);
+  if (!rec) return value;
+  if (typeof rec.$oid === 'string') return rec.$oid;
+  const token = rec.$numberInt ?? rec.$numberDouble ?? rec.$numberLong;
+  if (typeof token === 'string' || typeof token === 'number') {
+    const n = Number(token);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return value;
+}
+
+export function mongoNumber(value: unknown): number | undefined {
+  const scalar = mongoScalar(value);
+  return typeof scalar === 'number' && Number.isFinite(scalar) ? scalar : undefined;
+}
+
 function asRecord(v: unknown): Record<string, unknown> | undefined {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
 }
@@ -52,19 +70,45 @@ function rowsOf(payload: unknown): Record<string, unknown>[] {
 }
 
 /** Copy a catalog product. Scores and prices are omitted when the payload does not include a number. */
+function nutritionOf(row: Record<string, unknown>): Record<string, number | null> | undefined {
+  const out: Record<string, number | null> = {};
+  const block = asRecord(row.nutrition);
+  if (block) {
+    for (const [key, value] of Object.entries(block)) {
+      const n = mongoNumber(value);
+      if (n != null) out[key] = n;
+    }
+  }
+  const nutritionScore = mongoNumber(row.nutritionScore);
+  const sustainabilityScore = mongoNumber(row.sustainabilityScore);
+  if (nutritionScore != null && out.nutrition_score == null) out.nutrition_score = nutritionScore;
+  if (sustainabilityScore != null && out.sustainability_score == null) out.sustainability_score = sustainabilityScore;
+  return Object.keys(out).length ? out : undefined;
+}
+
+function priceOf(row: Record<string, unknown>): GuavaProduct['price_context'] | undefined {
+  const priceIn = asRecord(row.price_context) ?? asRecord(row.priceContext);
+  if (priceIn && (priceIn.amount != null || priceIn.currency != null || priceIn.note != null)) {
+    const amount = num(priceIn.amount) ?? mongoNumber(priceIn.amount);
+    const currency = str(priceIn.currency);
+    const note = str(priceIn.note);
+    if (amount != null || currency || note) return { ...(currency ? { currency } : {}), ...(amount != null ? { amount } : {}), ...(note ? { note } : {}) };
+  }
+  const amount = mongoNumber(row.price);
+  return amount != null ? { amount } : undefined;
+}
+
 export function readGuavaProduct(row: Record<string, unknown>): GuavaProduct | null {
-  const id = str(row.id) ?? str(row._id);
+  const id = str(mongoScalar(row.id)) ?? str(mongoScalar(row._id));
   const name = str(row.name);
   if (!id || !name) return null;
   const ingredients = Array.isArray(row.ingredients)
     ? row.ingredients.map((item) => (typeof item === 'string' ? item : str(asRecord(item)?.name))).filter((item): item is string => Boolean(item))
     : undefined;
-  const nutritionIn = asRecord(row.nutrition);
-  const nutrition = nutritionIn
-    ? Object.fromEntries(Object.entries(nutritionIn).map(([key, value]) => [key, num(value) ?? null]))
-    : undefined;
-  const priceIn = asRecord(row.price_context) ?? asRecord(row.priceContext);
-  const score = num(row.guava_score) ?? num(row.guavaScore) ?? num(row.score);
+  // Only the stored Guava Score. A missing or null score is omitted, never calculated.
+  const score = mongoNumber(row.guava_score ?? row.guavaScore);
+  const nutrition = nutritionOf(row);
+  const price = priceOf(row);
   const product: GuavaProduct = {
     id,
     name,
@@ -72,15 +116,10 @@ export function readGuavaProduct(row: Record<string, unknown>): GuavaProduct | n
     ...(str(row.brand) ? { brand: str(row.brand) } : {}),
     ...(str(row.source) ? { source: str(row.source) } : {}),
     ...(score != null ? { guava_score: score } : {}),
-    ...(ingredients ? { ingredients } : {}),
+    ...(ingredients?.length ? { ingredients } : {}),
     ...(nutrition ? { nutrition } : {}),
+    ...(price ? { price_context: price } : {}),
   };
-  if (priceIn) {
-    const amount = num(priceIn.amount);
-    const currency = str(priceIn.currency);
-    const note = str(priceIn.note);
-    if (amount != null || currency || note) product.price_context = { ...(currency ? { currency } : {}), ...(amount != null ? { amount } : {}), ...(note ? { note } : {}) };
-  }
   return product;
 }
 
@@ -88,15 +127,18 @@ function summaryOf(product: GuavaProduct): GuavaProductSummary {
   return { id: product.id, name: product.name, ...(product.barcode ? { barcode: product.barcode } : {}), ...(product.brand ? { brand: product.brand } : {}), ...(product.source ? { source: product.source } : {}) };
 }
 
+/** Public catalog on this host, after the Worker is deployed with the D1 binding. */
+export const HOSTED_GUAVA_CATALOG_URL = 'https://mcp.journeyfoods.io/apps/guava/';
+
 /**
- * Calls a Guava catalog that speaks GET /v1/products and GET /v1/products/:id.
- * This is not a guessed withguava.io route. Leave the base URL unset until the real catalog is known.
+ * Calls GET {base}/v1/products and GET {base}/v1/products/:id.
+ * Base `https://mcp.journeyfoods.io/apps/guava` is the route this Worker serves from the Guava D1 snapshot.
  */
 export class RestGuavaCatalog implements GuavaCatalog {
   constructor(private readonly baseUrl: string, private readonly fetchImpl: typeof fetch = fetch, private readonly timeoutMs = 15000) {}
 
   async search(q: GuavaQuery): Promise<GuavaProductSummary[]> {
-    const url = new URL('/v1/products', this.baseUrl);
+    const url = new URL('v1/products', this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`);
     if (q.query) url.searchParams.set('query', q.query);
     if (q.barcode) url.searchParams.set('barcode', q.barcode);
     url.searchParams.set('limit', String(q.limit));
@@ -105,11 +147,12 @@ export class RestGuavaCatalog implements GuavaCatalog {
   }
 
   async get(id: string): Promise<GuavaProduct | null> {
-    const url = new URL(`/v1/products/${encodeURIComponent(id)}`, this.baseUrl);
+    const root = this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`;
+    const url = new URL(`v1/products/${encodeURIComponent(id)}`, root);
     const payload = await this.getJson(url, true);
     if (payload == null) return null;
-    const root = asRecord(payload);
-    const row = asRecord(root?.product) ?? root;
+    const body = asRecord(payload);
+    const row = asRecord(body?.product) ?? body;
     return row ? readGuavaProduct(row) : null;
   }
 
