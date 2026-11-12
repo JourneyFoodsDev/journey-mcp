@@ -42,6 +42,12 @@ export interface JourneyConfig {
     roleClaim: string;
   };
   requestTimeoutMs: number;
+  /** Guava catalog base. Unset means Guava tools report that the catalog is not connected. */
+  guavaApiBaseUrl?: string;
+  /** Private JWK JSON for the builtin authorization server. Never commit a real key. */
+  oauthSigningJwk?: string;
+  /** OpenAI domain-challenge token. Served only when set. */
+  openaiAppsChallenge?: string;
 }
 
 const blank = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
@@ -112,5 +118,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): JourneyConfig 
       roleClaim: blank(env.OAUTH_ROLE_CLAIM) ?? 'journey_role',
     },
     requestTimeoutMs: Number(env.JOURNEY_REQUEST_TIMEOUT_MS || 15000),
+    guavaApiBaseUrl: strip(env.GUAVA_API_BASE_URL),
+    oauthSigningJwk: blank(env.OAUTH_JWT_PRIVATE_JWK),
+    openaiAppsChallenge: blank(env.OPENAI_APPS_CHALLENGE),
   };
 }

@@ -26,7 +26,12 @@ claude mcp add --transport http journey https://mcp.journeyfoods.io/mcp --header
 ```
 
 ### ChatGPT
-ChatGPT connectors need OAuth sign-in, which is coming soon on the hosted server, along with a ChatGPT directory listing. Until then, use Journey AI from any of the clients below.
+Two directory apps are separate endpoints on the same host. Submit each on its own. They do not replace `https://mcp.journeyfoods.io/mcp`, which still accepts `x-api-key`.
+
+- Journey Foods (CPG lookup): `https://mcp.journeyfoods.io/apps/journey-foods/mcp`
+- Guava by Journey (product lookup): `https://mcp.journeyfoods.io/apps/guava/mcp`
+
+Submission notes, reviewer prompts, and the human checklist are in [`apps/journey-foods`](apps/journey-foods) and [`apps/guava`](apps/guava). Searches return at most 4 results unless the caller is signed in with full catalog access. OAuth 2.1 with PKCE S256 is advertised from the host. An identity provider, logos, legal URLs, a reviewer demo account, and a deploy are still required before directory review. See those READMEs.
 
 ### Cursor
 Add [`examples/cursor-mcp.json`](examples/cursor-mcp.json) to `.cursor/mcp.json` (hosted). For local use, use the `npx` block from the Claude Desktop example.

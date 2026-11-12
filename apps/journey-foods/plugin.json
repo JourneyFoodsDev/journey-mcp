@@ -1,0 +1,20 @@
+{
+  "name": "Journey Foods",
+  "description": "Look up food and CPG suppliers, ingredients, price indexes, and Journey Labs verification. Read-only. Searches return at most 4 results unless the caller is signed in with full catalog access.",
+  "mcp_server_url": "https://mcp.journeyfoods.io/apps/journey-foods/mcp",
+  "auth": {
+    "type": "oauth2.1",
+    "pkce": "S256",
+    "scopes": ["journey:read"]
+  },
+  "required_before_submission": [
+    "logo_url",
+    "privacy_policy_url",
+    "terms_of_service_url",
+    "support_url",
+    "reviewer_demo_account",
+    "openai_apps_challenge",
+    "walkthrough_video",
+    "identity_provider"
+  ]
+}

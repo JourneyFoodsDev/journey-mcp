@@ -13,6 +13,7 @@ describe('tool registry', () => {
       expect(t.outputSchema?.type).toBe('object');
       expect(t.annotations?.readOnlyHint).toBe(true);
       expect(t.annotations?.destructiveHint).toBe(false);
+      expect(t.annotations?.openWorldHint).toBe(false);
     }
   });
 

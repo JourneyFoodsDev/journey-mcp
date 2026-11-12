@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "guava": {
+      "url": "https://mcp.journeyfoods.io/apps/guava/mcp"
+    }
+  }
+}

@@ -11,7 +11,7 @@ import type { Account } from './account.js';
  * The authorization server itself (login, consent, DCR/CIMD) is configured separately via OAUTH_ISSUER.
  */
 export interface TokenVerifier {
-  verify(token: string): Promise<Account>;
+  verify(token: string, audience?: string | string[]): Promise<Account>;
 }
 
 function scopesOf(p: Record<string, unknown>): string[] {
@@ -38,9 +38,23 @@ function toAccount(p: Record<string, unknown>, cfg: JourneyConfig['oauth']): Acc
   const tier = claim(p, [cfg.tierClaim]) ?? null;
   const status = claim(p, [cfg.statusClaim, 'journey_status', 'subscription_status', 'status']) ?? null;
   const role = claim(p, [cfg.roleClaim, 'journey_role', 'role']) ?? null;
+  const displayName = claim(p, ['name', 'preferred_username']);
+  const email = claim(p, ['email']);
   const limits = p.journey_limits as Account['contractLimits'] | undefined;
   // The company owns the allowance. The user is still forwarded so the backend can attribute the call.
-  return { id: `acct:${companyId ?? id}`, tier, status, role, userId, companyId, authMethod: 'oauth', scopes, contractLimits: limits };
+  return {
+    id: `acct:${companyId ?? id}`,
+    tier,
+    status,
+    role,
+    userId,
+    companyId,
+    authMethod: 'oauth',
+    scopes,
+    contractLimits: limits,
+    ...(displayName ? { displayName } : {}),
+    ...(email ? { email } : {}),
+  };
 }
 
 export class JwtVerifier implements TokenVerifier {
@@ -49,10 +63,10 @@ export class JwtVerifier implements TokenVerifier {
     if (!cfg.jwksUrl && !jwks) throw new Error('OAUTH_JWKS_URL is required for JWT verification');
     this.jwks = jwks ?? createRemoteJWKSet(new URL(cfg.jwksUrl!));
   }
-  async verify(token: string): Promise<Account> {
+  async verify(token: string, audience?: string | string[]): Promise<Account> {
     let payload: JWTPayload;
     try {
-      ({ payload } = await jwtVerify(token, this.jwks as never, { issuer: this.cfg.issuer, audience: this.resource }));
+      ({ payload } = await jwtVerify(token, this.jwks as never, { issuer: this.cfg.issuer, audience: audience ?? this.resource }));
     } catch (e) {
       throw new AuthError(`Access token rejected: ${(e as Error).message}`);
     }
@@ -62,7 +76,7 @@ export class JwtVerifier implements TokenVerifier {
 
 export class IntrospectionVerifier implements TokenVerifier {
   constructor(private readonly cfg: JourneyConfig['oauth'], private readonly resource: string, private readonly fetchImpl: typeof fetch = fetch) {}
-  async verify(token: string): Promise<Account> {
+  async verify(token: string, audience?: string): Promise<Account> {
     const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
     if (this.cfg.introspectionClientId && this.cfg.introspectionClientSecret) {
       headers.Authorization = 'Basic ' + Buffer.from(`${this.cfg.introspectionClientId}:${this.cfg.introspectionClientSecret}`).toString('base64');
@@ -74,7 +88,8 @@ export class IntrospectionVerifier implements TokenVerifier {
     const aud = body.aud ?? body.resource;
     const auds = Array.isArray(aud) ? aud.map(String) : aud ? [String(aud)] : [];
     const norm = (u: string) => u.replace(/\/+$/, '');
-    if (!auds.map(norm).includes(norm(this.resource))) throw new AuthError('Access token was not issued for this MCP server.');
+    const expected = audience ?? this.resource;
+    if (!auds.map(norm).includes(norm(expected))) throw new AuthError('Access token was not issued for this MCP server.');
     if (this.cfg.issuer && body.iss && body.iss !== this.cfg.issuer) throw new AuthError('Access token issuer is not trusted.');
     return toAccount(body, this.cfg);
   }
@@ -87,13 +102,15 @@ export function createTokenVerifier(cfg: JourneyConfig): TokenVerifier | undefin
 }
 
 /** RFC 9728 protected resource metadata served at /.well-known/oauth-protected-resource[/mcp]. */
-export function protectedResourceMetadata(cfg: JourneyConfig) {
+export function protectedResourceMetadata(cfg: JourneyConfig, over: { resource?: string; name?: string; documentation?: string } = {}) {
+  const resource = over.resource ?? cfg.resourceUrl;
+  const origin = new URL(resource).origin;
   return {
-    resource: cfg.resourceUrl,
-    authorization_servers: cfg.oauth.issuer ? [cfg.oauth.issuer] : [],
+    resource,
+    authorization_servers: cfg.oauth.issuer ? [cfg.oauth.issuer] : [origin],
     scopes_supported: [cfg.oauth.requiredScope],
     bearer_methods_supported: ['header'],
-    resource_name: 'Journey AI',
-    resource_documentation: 'https://journeyfoods.io/mcp',
+    resource_name: over.name ?? 'Journey',
+    resource_documentation: over.documentation ?? 'https://www.journeyfoods.io/mcp',
   };
 }

@@ -31,7 +31,18 @@ describe('merged tool set', () => {
     const acct = account('free', 'acct:si');
     const { client } = await connect({ account: acct, enforcer });
     const r = await client.callTool({ name: 'search_ingredients', arguments: { query: 'Ingredient', limit: 25 } });
+    expect(sc(r).returned).toBe(4);
+    expect(sc(r).notice).toContain('https://www.journeyfoods.io/mcp');
+    expect((await enforcer.usage(acct)).used.ingredient).toBe(4);
+  });
+
+  it('search_ingredients returns the requested page for a subscribed account', async () => {
+    const enforcer = clockEnforcer();
+    const acct = account('startup', 'acct:full', { status: 'active' });
+    const { client } = await connect({ account: acct, enforcer });
+    const r = await client.callTool({ name: 'search_ingredients', arguments: { query: 'Ingredient', limit: 25 } });
     expect(sc(r).returned).toBe(25);
+    expect(sc(r).notice).toBeUndefined();
     expect((await enforcer.usage(acct)).used.ingredient).toBe(25);
   });
 
@@ -70,14 +81,15 @@ describe('merged tool set', () => {
     const acct = account('free', 'acct:pr', { appToken: 'session' });
     const { client } = await connect({ account: acct, enforcer });
     const list = await client.callTool({ name: 'search_products', arguments: { query: 'granola', limit: 5 } });
-    expect(sc(list).returned).toBe(5);
+    expect(sc(list).returned).toBe(4);
+    expect(sc(list).notice).toContain('https://www.journeyfoods.io/mcp');
     expect(sc(list).total).toBe(30);
     const one = await client.callTool({ name: 'get_product', arguments: { product_id: pid(1), sections: ['ingredients'] } });
     expect(sc(one).product.ingredients[0].name).toBe('oats');
     expect(sc(one).product.nutrition).toBeUndefined();
     const other = await client.callTool({ name: 'get_product', arguments: { product_id: pid(20) } });
     expect(sc(other).product.nutrition.protein).toBe(6);
-    expect((await enforcer.usage(acct)).used.product).toBe(6); // pid(1) was already counted by the search
+    expect((await enforcer.usage(acct)).used.product).toBe(5); // four from the preview, plus pid(20)
   });
 
   it('get_product is blocked at the free product cap with the upgrade and contract message', async () => {

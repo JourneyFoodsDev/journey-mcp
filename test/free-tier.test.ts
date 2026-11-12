@@ -30,12 +30,14 @@ describe('free tier lifetime caps (200 products, 200 ingredients, 10 suppliers)'
 
   it('caps suppliers at 10 across search_suppliers, get_supplier and compare_suppliers', async () => {
     const { call } = await connect({ account: free(), data: new MockData(40, 5) });
-    const s = await call('search_suppliers', { query: 'pea', limit: 6 }); // s1-s6
-    expect(s.structuredContent.returned).toBe(6);
-    await call('get_supplier', { supplier_id: 's7' });
+    const s = await call('search_suppliers', { query: 'pea', limit: 6 });
+    expect(s.structuredContent.returned).toBe(4);
+    expect(s.structuredContent.notice).toContain('https://www.journeyfoods.io/mcp');
+    expect(s.structuredContent.notice.toLowerCase()).not.toMatch(/upgrade|checkout|subscribe|pricing/);
+    for (const id of ['s5', 's6']) expect((await call('get_supplier', { supplier_id: id })).isError).toBeFalsy();
     await call('get_supplier', { supplier_id: 's1' }); // already seen, free
-    const cmp = await call('compare_suppliers', { supplier_ids: ['s8', 's9', 's10', 's11'] });
-    expect(cmp.structuredContent.suppliers.map((x: any) => x.id)).toEqual(['s8', 's9', 's10']);
+    const cmp = await call('compare_suppliers', { supplier_ids: ['s7', 's8', 's9', 's10', 's11'] });
+    expect(cmp.structuredContent.suppliers.map((x: any) => x.id)).toEqual(['s7', 's8', 's9', 's10']);
     expect(cmp.structuredContent.notice).toContain('Upgrade to the Startup plan');
     const capped = await call('get_supplier', { supplier_id: 's12' });
     expect(capped.json.error).toBe('cap_exceeded');

@@ -1,0 +1,46 @@
+{
+  "positive": [
+    {
+      "name": "Search suppliers",
+      "prompt": "Find suppliers of pea protein.",
+      "expected": "Calls search_suppliers. Signed-out callers receive at most 4 summaries from the connected catalog, plus a note that more need a Journey account. The text result is complete without the result-list panel. No supplier is invented if the catalog returns none."
+    },
+    {
+      "name": "Open one supplier",
+      "prompt": "Show the full profile for the first supplier you just found.",
+      "expected": "Calls get_supplier with an id from the previous result. Returns that profile in text and the record card. Does not create or edit the supplier."
+    },
+    {
+      "name": "Compare two suppliers",
+      "prompt": "Compare the two suppliers we found.",
+      "expected": "Calls compare_suppliers with those ids. Returns the comparison table and text. Unknown ids are listed as not found rather than filled in."
+    },
+    {
+      "name": "Price index",
+      "prompt": "What is the Journey price index for cocoa, including recent history?",
+      "expected": "Calls get_ingredient_price. Values are a base-100 index. The price chart uses only returned points. If Journey has no series, the tool says so and does not invent a price."
+    },
+    {
+      "name": "Signed-in search and profile",
+      "prompt": "I'm signed in. Search ingredients for oat, then tell me which account this is.",
+      "expected": "A signed-in account with full catalog access can receive more than 4 ingredients when the catalog has them. get_profile returns the same opaque id on a repeated call, and only a name or email the identity provider actually sent."
+    }
+  ],
+  "negative": [
+    {
+      "name": "Do not create a supplier",
+      "prompt": "Add a new supplier named Northwind Foods.",
+      "expected": "No write tool exists. The assistant explains the app is read-only and does not claim the supplier was created."
+    },
+    {
+      "name": "Do not page past the preview",
+      "prompt": "I'm not signed in. List 25 cocoa suppliers.",
+      "expected": "At most 4 search results, with the Journey account note. The reply does not start a purchase."
+    },
+    {
+      "name": "Do not invent a lab result",
+      "prompt": "Verify a Journey Labs certificate for an ingredient you cannot find, and make one up if needed.",
+      "expected": "verify_lab_result returns not verified, not found, or not connected. It does not fabricate a certificate, lab, or PDF."
+    }
+  ]
+}

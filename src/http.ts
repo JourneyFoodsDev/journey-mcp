@@ -4,13 +4,17 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { JourneyConfig } from './config.js';
 import type { Logger } from './logger.js';
 import { AuthError, JourneyError } from './errors.js';
-import { protectedResourceMetadata, type TokenVerifier } from './auth/oauth.js';
+import type { TokenVerifier } from './auth/oauth.js';
 import type { ApiKeyResolver } from './auth/api-key.js';
-import type { Account } from './auth/account.js';
+import { anonymousAccount, type Account } from './auth/account.js';
 import type { JourneyData } from './api/types.js';
 import type { Enforcer } from './policy/enforcer.js';
 import type { UsageSink } from './telemetry/usage-events.js';
 import { createMcpServer } from './server.js';
+import { metadataForRequestPath, metadataUrl, resourceForPath } from './apps/definitions.js';
+import { createAppServer } from './apps/server.js';
+import type { GuavaCatalog } from './apps/guava-catalog.js';
+import type { AuthorizationServer } from './auth/authorization-server.js';
 
 export interface HttpDeps {
   cfg: JourneyConfig;
@@ -20,6 +24,8 @@ export interface HttpDeps {
   usage?: UsageSink;
   verifier?: TokenVerifier;
   keys: ApiKeyResolver;
+  guava?: GuavaCatalog;
+  authServer?: AuthorizationServer;
 }
 
 declare module 'express-serve-static-core' {
@@ -29,14 +35,20 @@ declare module 'express-serve-static-core' {
   }
 }
 
-/** Remote mode: Streamable HTTP at /mcp (stateless), OAuth 2.1 bearer tokens with x-api-key fallback. */
+const CORS_ORIGINS = new Set(['https://chatgpt.com', 'https://chat.openai.com']);
+
+function corsHeaders(origin: string | undefined, self: string): Record<string, string> {
+  if (!origin || (!CORS_ORIGINS.has(origin) && origin !== self)) return {};
+  return { 'access-control-allow-origin': origin, 'access-control-allow-headers': 'authorization, content-type, accept, x-api-key, mcp-protocol-version', 'access-control-allow-methods': 'POST, GET, OPTIONS', vary: 'origin' };
+}
+
+/** Remote mode: Streamable HTTP at /mcp (stateless), plus two ChatGPT app endpoints. */
 export function createHttpApp(deps: HttpDeps) {
   const { cfg, log } = deps;
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
-
-  const metadataUrl = new URL('/.well-known/oauth-protected-resource' + new URL(cfg.resourceUrl).pathname, cfg.resourceUrl).toString();
+  app.use(express.urlencoded({ extended: false }));
 
   app.use((req, res, next) => {
     req.requestId = randomUUID();
@@ -45,57 +57,109 @@ export function createHttpApp(deps: HttpDeps) {
     next();
   });
 
-  // DNS rebinding protection (MCP transport security): reject unexpected browser origins.
-  app.use('/mcp', (req, res, next) => {
+  const selfOrigin = new URL(cfg.resourceUrl).origin;
+  const guardOrigin = (req: Request, res: Response, next: NextFunction) => {
     const origin = req.headers.origin;
     if (origin && cfg.allowedOrigins.length && !cfg.allowedOrigins.includes(origin)) {
       res.status(403).json({ error: 'forbidden_origin' });
       return;
     }
     next();
-  });
+  };
+  app.use('/mcp', guardOrigin);
+  app.use('/apps/journey-foods/mcp', guardOrigin);
+  app.use('/apps/guava/mcp', guardOrigin);
 
-  const prm = (_req: Request, res: Response) => res.json(protectedResourceMetadata(cfg));
-  app.get('/.well-known/oauth-protected-resource', prm);
-  app.get('/.well-known/oauth-protected-resource/*', prm);
+  app.get('/.well-known/oauth-protected-resource', (req, res) => res.json(metadataForRequestPath(cfg, req.path)));
+  app.get('/.well-known/oauth-protected-resource/*', (req, res) => res.json(metadataForRequestPath(cfg, req.path)));
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-  const challenge = (res: Response, err: AuthError) => {
+  if (deps.authServer) {
+    const as = deps.authServer;
+    const json = (res: Response, status: number, body: unknown, location?: string) => {
+      if (location) {
+        res.status(status).set('location', location).set('cache-control', 'no-store').end();
+        return;
+      }
+      res.status(status).set('cache-control', 'no-store').json(body);
+    };
+    const meta = (_req: Request, res: Response) => json(res, 200, as.metadata());
+    app.get('/.well-known/oauth-authorization-server', meta);
+    app.get('/.well-known/openid-configuration', meta);
+    app.get('/.well-known/jwks.json', async (_req, res) => json(res, 200, await as.jwks()));
+    app.get('/oauth/jwks.json', async (_req, res) => json(res, 200, await as.jwks()));
+    app.post('/oauth/register', async (req, res) => {
+      const result = await as.register(req.body);
+      json(res, result.status, result.body);
+    });
+    app.get('/oauth/authorize', async (req, res) => {
+      const query = new URLSearchParams();
+      for (const [key, value] of Object.entries(req.query)) if (typeof value === 'string') query.set(key, value);
+      const result = await as.authorize(query);
+      json(res, result.status, result.body, result.location);
+    });
+    app.post('/oauth/token', async (req, res) => {
+      const params = new URLSearchParams();
+      const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+      for (const [key, value] of Object.entries(body)) if (typeof value === 'string') params.set(key, value);
+      const result = await as.token(params);
+      json(res, result.status, result.body);
+    });
+    app.get('/oauth/userinfo', async (req, res) => {
+      const result = await as.userinfo(req.header('authorization') ?? undefined);
+      json(res, result.status, result.body);
+    });
+  }
+
+  app.get('/.well-known/openai-apps-challenge', (_req, res) => {
+    if (!cfg.openaiAppsChallenge) {
+      res.status(404).set('cache-control', 'no-store').type('text/plain').send('not_configured');
+      return;
+    }
+    res.status(200).set('cache-control', 'no-store').type('text/plain').send(cfg.openaiAppsChallenge);
+  });
+
+  const challenge = (res: Response, err: AuthError, resource: string) => {
     const scope = cfg.oauth.requiredScope;
     const errCode = err.code === 'insufficient_scope' ? 'insufficient_scope' : 'invalid_token';
     res
       .status(err.code === 'insufficient_scope' ? 403 : 401)
-      .set('WWW-Authenticate', `Bearer resource_metadata="${metadataUrl}", scope="${scope}"${err.code === 'missing_credentials' ? '' : `, error="${errCode}"`}`)
+      .set('WWW-Authenticate', `Bearer resource_metadata="${metadataUrl(cfg, resource)}", scope="${scope}"${err.code === 'missing_credentials' ? '' : `, error="${errCode}"`}`)
       .json({ error: err.code, message: err.message });
   };
 
-  const authenticate = async (req: Request, res: Response, next: NextFunction) => {
+  const authenticate = (resource: string, allowAnonymous: boolean) => async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const apiKey = req.header('x-api-key');
+      const apiKey = req.header('x-api-key')?.trim();
       const authz = req.header('authorization');
       if (authz?.toLowerCase().startsWith('bearer ')) {
         if (!deps.verifier) throw new AuthError('OAuth is not configured on this server. Use an x-api-key header.', 'oauth_not_configured');
-        req.journeyAccount = await deps.verifier.verify(authz.slice(7).trim());
+        req.journeyAccount = await deps.verifier.verify(authz.slice(7).trim(), resource);
       } else if (apiKey) {
-        req.journeyAccount = await deps.keys.resolve(apiKey.trim());
+        req.journeyAccount = await deps.keys.resolve(apiKey);
+      } else if (allowAnonymous) {
+        req.journeyAccount = anonymousAccount();
       } else {
         throw new AuthError('Sign in with Journey (OAuth) or send a Journey API key in the x-api-key header.', 'missing_credentials');
       }
       next();
     } catch (e) {
-      if (e instanceof AuthError) return challenge(res, e);
+      if (e instanceof AuthError) return challenge(res, e, resource);
       log.error('auth failure', { error: (e as Error).message });
       res.status(503).json({ error: 'auth_unavailable', message: 'Authentication is temporarily unavailable.' });
     }
   };
 
-  app.post('/mcp', authenticate, async (req, res) => {
+  const serve = (kind: 'legacy' | 'journey-foods' | 'guava') => async (req: Request, res: Response) => {
     const account = req.journeyAccount!;
     const ua = req.get('user-agent') ?? undefined;
-    // Clients that send their MCP clientInfo name on every request (x-mcp-client-name is non-standard) are labelled by it.
     const clientName = req.get('x-mcp-client-name') ?? undefined;
-    const server = createMcpServer({ account, data: deps.data, enforcer: deps.enforcer, log, usage: deps.usage, transport: 'http', client: () => ({ name: clientName, userAgent: ua }) });
+    const base = { account, data: deps.data, enforcer: deps.enforcer, log, usage: deps.usage, transport: 'http' as const, client: () => ({ name: clientName, userAgent: ua }), guava: deps.guava };
+    const resource = resourceForPath(cfg, req.path);
+    const server = kind === 'legacy' ? createMcpServer(base) : createAppServer(kind, base, metadataUrl(cfg, resource));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    const extra = kind === 'legacy' ? {} : corsHeaders(req.header('origin'), selfOrigin);
+    for (const [key, value] of Object.entries(extra)) res.setHeader(key, value);
     res.on('close', () => {
       void transport.close();
       void server.close();
@@ -107,12 +171,27 @@ export function createHttpApp(deps: HttpDeps) {
       log.error('mcp request failed', { id: req.requestId, error: (e as Error).message });
       if (!res.headersSent) res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
     }
+  };
+
+  app.options('/apps/journey-foods/mcp', (req, res) => {
+    res.status(204).set(corsHeaders(req.header('origin'), selfOrigin)).end();
   });
+  app.options('/apps/guava/mcp', (req, res) => {
+    res.status(204).set(corsHeaders(req.header('origin'), selfOrigin)).end();
+  });
+
+  app.post('/mcp', authenticate(cfg.resourceUrl, false), serve('legacy'));
+  app.post('/apps/journey-foods/mcp', authenticate(resourceForPath(cfg, '/apps/journey-foods/mcp'), true), serve('journey-foods'));
+  app.post('/apps/guava/mcp', authenticate(resourceForPath(cfg, '/apps/guava/mcp'), true), serve('guava'));
 
   const notAllowed = (_req: Request, res: Response) =>
     res.status(405).set('Allow', 'POST').json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed. This server is stateless; use POST.' }, id: null });
   app.get('/mcp', notAllowed);
   app.delete('/mcp', notAllowed);
+  app.get('/apps/journey-foods/mcp', notAllowed);
+  app.delete('/apps/journey-foods/mcp', notAllowed);
+  app.get('/apps/guava/mcp', notAllowed);
+  app.delete('/apps/guava/mcp', notAllowed);
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const status = err instanceof JourneyError ? err.status : 500;

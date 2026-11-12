@@ -4,7 +4,11 @@ import { createLogger } from '../src/logger.js';
 import { buildRuntime } from '../src/runtime.js';
 import { createMcpServer } from '../src/server.js';
 import { readSecretBinding } from '../src/auth/end-user.js';
+import { anonymousAccount } from '../src/auth/account.js';
 import { AuthError } from '../src/errors.js';
+import { appForPath, metadataForRequestPath, metadataUrl, resourceForPath } from '../src/apps/definitions.js';
+import { createAppServer } from '../src/apps/server.js';
+import type { AppId } from '../src/apps/definitions.js';
 export { AccountLedger, JourneyMcp } from './durable-objects.js';
 
 /**
@@ -59,6 +63,7 @@ export async function loadWorkerConfig(env: WorkerEnv) {
   // App reads follow the supplier base. An explicit supplier URL wins over the live JOURNEY_API_BASE name.
   if (!proc.JOURNEY_APP_API_BASE_URL) proc.JOURNEY_APP_API_BASE_URL = proc.JOURNEY_SUPPLIER_API_BASE_URL;
   if (!proc.JOURNEY_PRICE_API_BASE_URL && proc.JOURNEY_PRICE_API_BASE) proc.JOURNEY_PRICE_API_BASE_URL = proc.JOURNEY_PRICE_API_BASE;
+  if (!proc.MCP_RESOURCE_URL) proc.MCP_RESOURCE_URL = proc.MCP_RESOURCE || 'https://mcp.journeyfoods.io/mcp';
   const supplier = await readSecretBinding(env.JOURNEY_SUPPLIER_API_KEY);
   // Missing signing secret: leave it unset so backend calls omit the end-user headers instead of 401ing.
   const signing = await readSecretBinding(env.JOURNEY_END_USER_SIGNING_SECRET, { optional: true });
@@ -78,50 +83,140 @@ function runtime(env: WorkerEnv) {
   return runtimePromise;
 }
 
-function unauthorized(message = 'Authentication required. Send a Journey API key in the x-api-key header.'): Response {
+function unauthorized(message = 'Authentication required. Send a Journey API key in the x-api-key header.', metadata?: string): Response {
+  const extra = metadata ? ` resource_metadata="${metadata}",` : '';
   return new Response(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message }, id: null }), {
     status: 401,
     headers: {
       'content-type': 'application/json',
       'cache-control': 'no-store',
-      'www-authenticate': 'Bearer realm="Journey AI", error="invalid_token", error_description="Send a Journey API key in x-api-key. Get a free trial key at https://price.journeyfoods.io"',
+      'www-authenticate': `Bearer realm="Journey",${extra} error="invalid_token", error_description="Send a Journey API key in x-api-key, or sign in with OAuth. Get a free trial key at https://price.journeyfoods.io"`,
     },
   });
+}
+
+const CORS_ORIGINS = new Set(['https://chatgpt.com', 'https://chat.openai.com']);
+
+function withCors(request: Request, response: Response): Response {
+  const origin = request.headers.get('origin');
+  const self = new URL(request.url).origin;
+  if (!origin || (!CORS_ORIGINS.has(origin) && origin !== self)) return response;
+  const headers = new Headers(response.headers);
+  headers.set('access-control-allow-origin', origin);
+  headers.set('access-control-allow-headers', 'authorization, content-type, accept, x-api-key, mcp-protocol-version');
+  headers.set('access-control-allow-methods', 'POST, GET, OPTIONS');
+  headers.set('vary', 'origin');
+  return new Response(response.body, { status: response.status, headers });
+}
+
+async function readParams(request: Request): Promise<URLSearchParams> {
+  const text = await request.text();
+  const type = request.headers.get('content-type') ?? '';
+  if (type.includes('application/json')) {
+    const body = text ? JSON.parse(text) as Record<string, unknown> : {};
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(body)) if (typeof value === 'string') params.set(key, value);
+    return params;
+  }
+  return new URLSearchParams(text);
 }
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === 'GET' && url.pathname === '/') {
-      return Response.json({ name: 'Journey AI', mcp: `${url.origin}/mcp`, auth: ['api_key'], docs: 'https://journeyfoods.io/mcp' });
+    const rtPromise = () => runtime(env);
+    if (request.method === 'GET' && (url.pathname === '/.well-known/oauth-protected-resource' || url.pathname.startsWith('/.well-known/oauth-protected-resource/'))) {
+      const rt = await rtPromise();
+      return Response.json(metadataForRequestPath(rt.cfg, url.pathname), { headers: { 'cache-control': 'no-store' } });
     }
-    // Every data endpoint requires an API key. `/` is discovery only and returns no Journey data.
-    if (url.pathname !== '/mcp') return Response.json({ error: 'not_found' }, { status: 404 });
+    if (request.method === 'GET' && (url.pathname === '/.well-known/oauth-authorization-server' || url.pathname === '/.well-known/openid-configuration')) {
+      const rt = await rtPromise();
+      return Response.json(rt.authServer.metadata(), { headers: { 'cache-control': 'no-store' } });
+    }
+    if (request.method === 'GET' && (url.pathname === '/.well-known/jwks.json' || url.pathname === '/oauth/jwks.json')) {
+      const rt = await rtPromise();
+      return Response.json(await rt.authServer.jwks(), { headers: { 'cache-control': 'no-store' } });
+    }
+    if (request.method === 'GET' && url.pathname === '/.well-known/openai-apps-challenge') {
+      const token = (await readSecretBinding(env.OPENAI_APPS_CHALLENGE, { optional: true })) ?? (typeof env.OPENAI_APPS_CHALLENGE === 'string' ? env.OPENAI_APPS_CHALLENGE.trim() : '');
+      if (!token) return new Response('not_configured', { status: 404, headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } });
+      return new Response(token, { headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } });
+    }
+    if (url.pathname === '/oauth/register' && request.method === 'POST') {
+      const rt = await rtPromise();
+      const result = await rt.authServer.register(await request.json().catch(() => ({})));
+      return Response.json(result.body, { status: result.status, headers: { 'cache-control': 'no-store' } });
+    }
+    if (url.pathname === '/oauth/authorize' && request.method === 'GET') {
+      const rt = await rtPromise();
+      const result = await rt.authServer.authorize(url.searchParams);
+      if (result.location) return new Response(null, { status: result.status, headers: { location: result.location, 'cache-control': 'no-store' } });
+      return Response.json(result.body, { status: result.status, headers: { 'cache-control': 'no-store' } });
+    }
+    if (url.pathname === '/oauth/token' && request.method === 'POST') {
+      const rt = await rtPromise();
+      const result = await rt.authServer.token(await readParams(request));
+      return Response.json(result.body, { status: result.status, headers: { 'cache-control': 'no-store' } });
+    }
+    if (url.pathname === '/oauth/userinfo' && request.method === 'GET') {
+      const rt = await rtPromise();
+      const result = await rt.authServer.userinfo(request.headers.get('authorization') ?? undefined);
+      return Response.json(result.body, { status: result.status, headers: { 'cache-control': 'no-store' } });
+    }
+    if (request.method === 'GET' && url.pathname === '/') {
+      return Response.json({
+        name: 'Journey',
+        mcp: `${url.origin}/mcp`,
+        auth: ['api_key', 'oauth'],
+        docs: 'https://www.journeyfoods.io/mcp',
+        apps: {
+          journey_foods: `${url.origin}/apps/journey-foods/mcp`,
+          guava: `${url.origin}/apps/guava/mcp`,
+        },
+      });
+    }
+    const app = appForPath(url.pathname);
+    const legacy = url.pathname === '/mcp';
+    if (!legacy && !app) return Response.json({ error: 'not_found' }, { status: 404 });
+    if (request.method === 'OPTIONS' && app) return withCors(request, new Response(null, { status: 204 }));
     if (request.method !== 'POST') {
       return Response.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed. This server is stateless; use POST.' }, id: null }, { status: 405 });
     }
+    const rt = await rtPromise();
+    const resource = resourceForPath(rt.cfg, url.pathname);
     const apiKey = request.headers.get('x-api-key')?.trim();
-    if (!apiKey) return unauthorized();
-    const rt = await runtime(env);
+    const authz = request.headers.get('authorization');
     let account;
     try {
-      account = await rt.keys.resolve(apiKey);
+      if (authz?.toLowerCase().startsWith('bearer ')) {
+        if (!rt.verifier) return unauthorized('OAuth is not configured on this server. Use an x-api-key header.', metadataUrl(rt.cfg, resource));
+        account = await rt.verifier.verify(authz.slice(7).trim(), resource);
+      } else if (apiKey) {
+        account = await rt.keys.resolve(apiKey);
+      } else if (app) {
+        account = anonymousAccount();
+      } else {
+        return unauthorized('Authentication required. Send a Journey API key in the x-api-key header.', metadataUrl(rt.cfg, resource));
+      }
     } catch (e) {
-      return unauthorized(e instanceof AuthError ? e.message : 'Authentication failed.');
+      return unauthorized(e instanceof AuthError ? e.message : 'Authentication failed.', metadataUrl(rt.cfg, resource));
     }
-    const server = createMcpServer({
+    const base = {
       account,
       data: rt.data,
       enforcer: rt.enforcer,
       log: rt.log,
       usage: rt.usage,
-      transport: 'worker',
+      transport: 'worker' as const,
       client: () => ({ userAgent: request.headers.get('user-agent') ?? undefined }),
-    });
+      guava: rt.guava,
+    };
+    const server = app ? createAppServer(app.id as AppId, base, metadataUrl(rt.cfg, resource)) : createMcpServer(base);
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     await server.connect(transport);
     try {
-      return await transport.handleRequest(request);
+      const response = await transport.handleRequest(request);
+      return app ? withCors(request, response) : response;
     } finally {
       await transport.close();
       await server.close();

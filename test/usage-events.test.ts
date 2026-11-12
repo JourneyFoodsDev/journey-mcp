@@ -30,19 +30,17 @@ describe('usage events', () => {
     await client.callTool({ name: 'search_suppliers', arguments: { query: 'secret-query', limit: 5 } });
     expect(events).toHaveLength(1);
     const e = events[0];
-    expect(e).toMatchObject({ v: 1, account: 'acct:ev', tier: 'free', tool: 'search_suppliers', outcome: 'ok', records: { supplier: 5 }, withheld: 0, client: 'Claude', client_version: '1.2.3', transport: 'stdio' });
-    expect(e.cap_used_max).toBe(0.5); // 5 of 10 free suppliers
+    expect(e).toMatchObject({ v: 1, account: 'acct:ev', tier: 'free', tool: 'search_suppliers', outcome: 'ok', records: { supplier: 4 }, withheld: 0, client: 'Claude', client_version: '1.2.3', transport: 'stdio' });
+    expect(e.cap_used_max).toBe(0.4); // 4 of 10 free suppliers; the preview withholds the rest before they are admitted
     expect(e.cap_entity_max).toBe('supplier');
     expect(e.latency_ms).toBeGreaterThanOrEqual(0);
     expect(JSON.stringify(e)).not.toContain('secret-query');
   });
 
-  it('records withheld rows and cap_exceeded outcomes', async () => {
+  it('records the 4-result preview for an account without full catalog access', async () => {
     const { client, events } = await withSink('free', 'acct:ev2', 'Cursor');
     await client.callTool({ name: 'search_suppliers', arguments: { query: 'abc', limit: 25 } });
-    await client.callTool({ name: 'get_supplier', arguments: { supplier_id: 's20' } });
-    expect(events[0]).toMatchObject({ records: { supplier: 10 }, withheld: 15, cap_used_max: 1, client: 'Cursor' });
-    expect(events[1]).toMatchObject({ outcome: 'cap_exceeded', error_code: 'cap_exceeded' });
+    expect(events[0]).toMatchObject({ records: { supplier: 4 }, withheld: 0, outcome: 'ok', client: 'Cursor' });
   });
 
   it('labels not_connected product calls', async () => {

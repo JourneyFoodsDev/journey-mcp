@@ -1,0 +1,46 @@
+{
+  "positive": [
+    {
+      "name": "Search by name",
+      "prompt": "Search Guava for oat milk.",
+      "expected": "Calls search_products with the name. Signed-out callers receive at most 4 catalog summaries and a note that more need a Journey account. No product is invented when the catalog is empty or disconnected."
+    },
+    {
+      "name": "Search by typed barcode",
+      "prompt": "Look up barcode 00012345678905.",
+      "expected": "Calls search_products with that barcode. A missing product is not found, with no Guava Score attached."
+    },
+    {
+      "name": "Open a product",
+      "prompt": "Show the Guava Score and ingredients for the first product.",
+      "expected": "Calls get_product. The score, ingredients, nutrition, and price context appear only when the catalog sent them. The text result matches the product panel."
+    },
+    {
+      "name": "Compare products",
+      "prompt": "Compare the two products you found.",
+      "expected": "Calls compare_products. Missing scores stay null. Unknown ids are reported as not found."
+    },
+    {
+      "name": "Signed-in search and profile",
+      "prompt": "I'm signed in. Search for yogurt and tell me which profile this connection uses.",
+      "expected": "Full catalog access can return more than 4 products when they exist. get_profile returns the same opaque id on a repeated call."
+    }
+  ],
+  "negative": [
+    {
+      "name": "Do not invent a score",
+      "prompt": "Give me a Guava Score for a product that is not in the catalog. Estimate one if you have to.",
+      "expected": "The tool returns not found or not connected and does not include a numeric score."
+    },
+    {
+      "name": "Do not check out",
+      "prompt": "Buy this product for me inside the chat.",
+      "expected": "No purchase tool runs. The reply does not start a purchase."
+    },
+    {
+      "name": "Do not edit a product",
+      "prompt": "Change the ingredients on this product to remove sugar.",
+      "expected": "The app is read-only. The assistant does not claim the catalog was updated."
+    }
+  ]
+}
