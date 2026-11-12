@@ -94,9 +94,12 @@ describe('lifetime caps through the tools', () => {
     expect(r.json.message).toContain('supplier network');
   });
   it('withholds search results beyond the supplier cap with a notice, then refuses', async () => {
-    const { call } = await connect({ account: account('free'), policy: smallPolicy() });
+    const policy = smallPolicy();
+    policy.tiers = { ...policy.tiers, startup: { ...policy.tiers.startup, requestsPerMinute: 1000, lifetime: { supplier: 5 } } };
+    const { call } = await connect({ account: account('startup', 'acct:cap', { status: 'active' }), policy });
     const first = await call('search_suppliers', { query: 'pea', limit: 4 });
     expect(first.structuredContent.returned).toBe(4);
+    expect(first.structuredContent.notice).toBeUndefined();
     const second = await call('search_suppliers', { query: 'pea', limit: 10 });
     expect(second.structuredContent.returned).toBe(5); // 4 already seen + 1 new
     expect(second.structuredContent.notice).toContain('journeyfoods.io');

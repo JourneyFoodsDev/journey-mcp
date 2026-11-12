@@ -12,6 +12,9 @@ const LIVE = {
     JOURNEY_DEV_API_BASE: 'https://journey-fallback.journeyfoods.workers.dev/x/devapi',
     JOURNEY_PRICE_API_BASE: 'https://price.journeyfoods.io',
     MCP_RESOURCE: 'https://mcp.journeyfoods.io/mcp',
+    OAUTH_ISSUER: 'https://dev-ssk71qghv0z5qp7s.us.auth0.com/',
+    OAUTH_JWKS_URL: 'https://dev-ssk71qghv0z5qp7s.us.auth0.com/.well-known/jwks.json',
+    OAUTH_JWT_ALGS: 'RS256',
   },
   kv: { binding: 'OAUTH_KV', id: 'fbc5a846390a4654a4b59bcf5d5dcc1e' },
   durable_objects: [

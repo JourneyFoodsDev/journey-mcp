@@ -10,7 +10,7 @@ export interface UsageEvent {
   ts: string;
   account: string;
   tier: string;
-  auth: 'oauth' | 'api_key' | 'local';
+  auth: 'oauth' | 'api_key' | 'local' | 'anonymous';
   tool: string;
   outcome: 'ok' | 'error' | 'cap_exceeded' | 'rate_limited' | 'not_connected';
   error_code?: string;

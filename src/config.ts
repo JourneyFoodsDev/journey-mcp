@@ -34,6 +34,8 @@ export interface JourneyConfig {
     introspectionClientId?: string;
     introspectionClientSecret?: string;
     requiredScope: string;
+    /** JWT algs accepted from the authorization server. Auth0 uses RS256. Empty allows the key's alg. */
+    algorithms: string[];
     accountClaim: string;
     tierClaim: string;
     userClaim: string;
@@ -42,6 +44,12 @@ export interface JourneyConfig {
     roleClaim: string;
   };
   requestTimeoutMs: number;
+  /** Guava catalog base. Unset means Guava tools report that the catalog is not connected. */
+  guavaApiBaseUrl?: string;
+  /** Private JWK JSON for the builtin authorization server. Never commit a real key. */
+  oauthSigningJwk?: string;
+  /** OpenAI domain-challenge token. Served only when set. */
+  openaiAppsChallenge?: string;
 }
 
 const blank = (v: string | undefined) => (v && v.trim() ? v.trim() : undefined);
@@ -104,6 +112,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): JourneyConfig 
       introspectionClientId: blank(env.OAUTH_INTROSPECTION_CLIENT_ID),
       introspectionClientSecret: blank(env.OAUTH_INTROSPECTION_CLIENT_SECRET),
       requiredScope: blank(env.OAUTH_REQUIRED_SCOPE) ?? 'journey:read',
+      algorithms: (env.OAUTH_JWT_ALGS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
       accountClaim: blank(env.OAUTH_ACCOUNT_CLAIM) ?? 'journey_account_id',
       tierClaim: blank(env.OAUTH_TIER_CLAIM) ?? 'journey_tier',
       userClaim: blank(env.OAUTH_USER_CLAIM) ?? 'journey_user_id',
@@ -112,5 +121,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): JourneyConfig 
       roleClaim: blank(env.OAUTH_ROLE_CLAIM) ?? 'journey_role',
     },
     requestTimeoutMs: Number(env.JOURNEY_REQUEST_TIMEOUT_MS || 15000),
+    guavaApiBaseUrl: strip(env.GUAVA_API_BASE_URL),
+    oauthSigningJwk: blank(env.OAUTH_JWT_PRIVATE_JWK),
+    openaiAppsChallenge: blank(env.OPENAI_APPS_CHALLENGE),
   };
 }

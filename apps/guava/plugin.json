@@ -1,0 +1,23 @@
+{
+  "name": "Guava by Journey",
+  "description": "Look up consumer products by name or typed barcode, including the Guava Score, ingredients, nutrition, and price context when the catalog provides them. Read-only. Searches return at most 4 results unless the caller is signed in with full catalog access.",
+  "mcp_server_url": "https://mcp.journeyfoods.io/apps/guava/mcp",
+  "auth": {
+    "type": "oauth2.1",
+    "pkce": "S256",
+    "scopes": ["catalog:read", "profile:read"],
+    "issuer": "https://dev-ssk71qghv0z5qp7s.us.auth0.com/",
+    "audience": "https://mcp.journeyfoods.io/apps/guava/mcp"
+  },
+  "required_before_submission": [
+    "logo_url",
+    "privacy_policy_url",
+    "terms_of_service_url",
+    "support_url",
+    "reviewer_demo_account",
+    "openai_apps_challenge",
+    "walkthrough_video",
+    "identity_provider",
+    "guava_catalog_url"
+  ]
+}

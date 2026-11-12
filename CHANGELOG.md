@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- Auth0 (`https://dev-ssk71qghv0z5qp7s.us.auth0.com/`) is the authorization server for the two apps. Tokens must be RS256, match that app's audience, and include `catalog:read` or `profile:read`. Full search requires the claim `https://journeyfoods.io/full_catalog`. A signed-in token without it stays on the 4-result gate.
+- ChatGPT directory apps on the existing host: `https://mcp.journeyfoods.io/apps/journey-foods/mcp` (Journey Foods) and `https://mcp.journeyfoods.io/apps/guava/mcp` (Guava by Journey). `https://mcp.journeyfoods.io/mcp` still accepts an API key. Submission checklists are in `apps/`.
+- Search tools return at most 4 results unless the caller is signed in with full catalog access. The note points at `https://www.journeyfoods.io/mcp` and does not start a purchase. Directory apps use that informational wording for limit errors.
+- OAuth 2.1 protected-resource metadata per app, PKCE S256 on the builtin authorization server, optional auth for catalog tools, required auth for `get_profile`, and API-key access kept for current clients. Login stays closed until an identity provider is configured.
+- MCP Apps panels for a result list, record card, comparison table, price chart, and Guava product panel. Widgets fetch no remote domains. Tool text results stay complete without them.
+- Guava tools read the D1 snapshot `journey-fallback-guava` written by `guava-catalog-sync` when `GUAVA_D1` is bound. `GET /apps/guava/v1/products` serves that snapshot. A null stored Guava Score is omitted. No score is calculated.
 - Atlas outage (Nov 2 2026): the hosted Worker reads ingredients from `https://journey-fallback.journeyfoods.workers.dev/x/devapi` and supplier/app data from `https://journey-fallback.journeyfoods.workers.dev/x/mcp`. Revert those vars to Cloud Run / `https://devapi.journeyfoods.io` when Atlas is back (`mcp_rollback_vars.json`). The price feed stays `https://price.journeyfoods.io`. Price tools return a base-100 index and P10–P90 ranges only.
 - `worker/wrangler.jsonc` declares the live bindings (`MCP_OBJECT`, `ACCOUNT_LEDGER`, `OAUTH_KV`, `USAGE_EVENTS`, and the secrets-store secrets) so a deploy does not drop them.
 - The hosted Worker reads `JOURNEY_PRICE_API_KEY` from the Secrets Store for price tools. Ingredient calls send the caller's developer key in `x-api-key`. A price-feed key is not sent to the fallback dev API.

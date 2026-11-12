@@ -3,7 +3,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { DEV_API_KEY_URL, HOSTED_MCP_URL, PRICE_API_KEY_URL } from './config.js';
 import { JourneyError, NotConnectedError } from './errors.js';
-import { capNotice, type Enforcer } from './policy/enforcer.js';
+import type { GuavaCatalog } from './apps/guava-catalog.js';
+import { PUBLIC_AUTH } from './apps/definitions.js';
+import { CATALOG_SCOPE, PROFILE_SCOPE, missingScopeResult } from './auth/oauth.js';
+import { applyPreview, directoryAccessMessage, joinNotice, limitNotice, previewQuery } from './policy/search-gate.js';
+import type { Enforcer } from './policy/enforcer.js';
 import type { Logger } from './logger.js';
 import type { Account } from './auth/account.js';
 import { backendPlan } from './auth/end-user.js';
@@ -36,19 +40,45 @@ export interface ToolContext {
   transport?: UsageEvent['transport'];
   /** Runs before each call (the Worker refreshes the user's session and tier here). */
   prepare?: () => Promise<void>;
+  /** ChatGPT directory app. Limit copy stays informational. */
+  directory?: boolean;
+  /** Tool name to MCP Apps UI resource URI. */
+  widgetUris?: Record<string, string>;
+  /** OAuth protected-resource metadata URL for this app endpoint. */
+  resourceMetadataUrl?: string;
+  /** Guava consumer catalog. Unset means the Guava tools report that it is not connected. */
+  guava?: GuavaCatalog;
 }
 
-const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
-const notice = z.string().optional().describe('Present when results were limited by the account data access policy.');
+export const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
+export const notice = z.string().optional().describe('Present when results were limited.');
 
-function ok(structured: Record<string, unknown>): CallToolResult {
+export function ok(structured: Record<string, unknown>): CallToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
 }
 
-function fail(e: unknown): CallToolResult {
-  const message = e instanceof JourneyError ? e.message : 'Journey request failed. No data was returned.';
+export function fail(e: unknown, directory = false): CallToolResult {
+  let message = e instanceof JourneyError ? e.message : 'Journey request failed. No data was returned.';
   const code = e instanceof JourneyError ? e.code : 'internal_error';
+  if (directory && e instanceof JourneyError && (code === 'cap_exceeded' || code === 'rate_limited')) message = directoryAccessMessage(message);
   return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: code, message }) }] };
+}
+
+/** Security schemes and UI resource for directory apps. The main server leaves this unset. */
+export function toolMeta(ctx: ToolContext, name: string, extra?: Record<string, unknown>): Record<string, unknown> | undefined {
+  const meta: Record<string, unknown> = { ...(extra ?? {}) };
+  const uri = ctx.widgetUris?.[name];
+  if (ctx.directory && !meta.securitySchemes) meta.securitySchemes = PUBLIC_AUTH;
+  if (uri) {
+    meta.ui = { resourceUri: uri };
+    meta['openai/outputTemplate'] = uri;
+  }
+  return Object.keys(meta).length ? meta : undefined;
+}
+
+function meta(ctx: ToolContext, name: string): { _meta: Record<string, unknown> } | Record<string, never> {
+  const value = toolMeta(ctx, name);
+  return value ? { _meta: value } : {};
 }
 
 /** Per-call wrapper around the enforcer that tallies the records each call returns and withholds. */
@@ -122,14 +152,41 @@ async function emitUsage(ctx: ToolContext, tool: string, started: number, outcom
   }
 }
 
+/** Anonymous catalog reads are not charged against a shared lifetime cap or a global rate bucket. */
+function previewEnforcer(inner: Enforcer): Enforcer {
+  return {
+    checkRate() {},
+    async assertCapacity() {},
+    async admit(_account, _entity, items) {
+      return { allowed: items, withheld: 0, remaining: Number.POSITIVE_INFINITY };
+    },
+    capErrorFor: (account, detail) => inner.capErrorFor(account, detail),
+    usage: (account) => inner.usage(account),
+  };
+}
+
+function forCall(ctx: ToolContext): ToolContext {
+  if (ctx.account.authMethod !== 'anonymous') return ctx;
+  return Object.create(ctx, { enforcer: { value: previewEnforcer(ctx.enforcer) } }) as ToolContext;
+}
+
 /** Wraps every tool: rate limit, request logging, usage events, uniform error handling. */
 function run<A>(ctx: ToolContext, tool: string, fn: (args: A, ctx: ToolContext) => Promise<CallToolResult>) {
   return async (args: A): Promise<CallToolResult> => {
     const started = Date.now();
-    const t = tallying(ctx);
     try {
       if (ctx.prepare) await ctx.prepare();
-      await ctx.enforcer.checkRate(ctx.account);
+    } catch (e) {
+      return fail(e, ctx.directory);
+    }
+    const live = forCall(ctx);
+    const t = tallying(live);
+    try {
+      if (ctx.directory && ctx.account.authMethod === 'oauth') {
+        const scope = tool === 'get_profile' ? PROFILE_SCOPE : CATALOG_SCOPE;
+        if (!ctx.account.scopes.includes(scope)) return missingScopeResult(ctx.resourceMetadataUrl ?? '', scope);
+      }
+      await live.enforcer.checkRate(live.account);
       const result = await fn(args, t.call);
       ctx.log.info('tool call', { tool, account: ctx.account.id, tier: ctx.account.tier ?? 'default', auth: ctx.account.authMethod, ms: Date.now() - started, outcome: result.isError ? 'error' : 'ok' });
       let code: string | undefined;
@@ -146,10 +203,12 @@ function run<A>(ctx: ToolContext, tool: string, fn: (args: A, ctx: ToolContext) 
       const level = e instanceof JourneyError && e.status < 500 ? 'warn' : 'error';
       ctx.log[level]('tool call failed', { tool, account: ctx.account.id, ms: Date.now() - started, error: e instanceof JourneyError ? e.code : 'internal_error', detail: (e as Error).message });
       await emitUsage(ctx, tool, started, outcomeOf(e), e instanceof JourneyError ? e.code : 'internal_error', t);
-      return fail(e);
+      return fail(e, ctx.directory);
     }
   };
 }
+
+export const runTool = run;
 
 const FEATURE_LABEL = {
   ingredients: 'Journey ingredient data (developer API)',
@@ -193,13 +252,14 @@ const cred = (ctx: ToolContext): { apiKey?: string; appToken?: string; endUser?:
   },
 });
 
-export function registerTools(server: McpServer, ctx: ToolContext) {
-  server.registerTool(
+export function registerTools(server: McpServer, ctx: ToolContext, options?: { only?: readonly string[] }) {
+  const want = (name: string) => !options?.only || options.only.includes(name);
+  if (want('search_suppliers')) server.registerTool(
     'search_suppliers',
     {
       title: 'Search suppliers',
       description:
-        'Find food and CPG suppliers in the Journey network by ingredient, category, region (country or country code) or certification. Returns supplier summaries; use get_supplier for a full profile.',
+        'Find food and CPG suppliers in the Journey network by ingredient, category, region (country or country code) or certification. Returns supplier summaries; use get_supplier for a full profile. Callers without full catalog access receive at most 4 results, with a note that more need a Journey account.',
       inputSchema: {
         query: z.string().min(2).max(200).optional().describe('Free-text search, e.g. supplier name or keyword'),
         ingredient: z.string().min(2).max(200).optional().describe('Ingredient the supplier provides, e.g. "pea protein"'),
@@ -211,20 +271,25 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
       },
       outputSchema: { suppliers: z.array(SupplierSchema), returned: z.number().int(), notice },
       annotations: { title: 'Search suppliers', ...READ_ONLY },
+      ...meta(ctx, 'search_suppliers'),
     },
     run(ctx, 'search_suppliers', async (a: { query?: string; ingredient?: string; category?: string; region?: string; certification?: string; limit?: number; page?: number }, ctx) => {
       need(ctx, 'suppliers');
       if (!a.query && !a.ingredient && !a.category && !a.region && !a.certification) {
         return fail(new JourneyError('Provide at least one of query, ingredient, category, region or certification.', 'invalid_arguments', 400));
       }
+      const requested = a.limit ?? 10;
+      const bounded = previewQuery(ctx.account, requested, a.page ?? 1);
+      if (bounded.blocked) return ok({ suppliers: [], returned: 0, notice: bounded.notice });
       await ctx.enforcer.assertCapacity(ctx.account, 'supplier');
-      const rows = await ctx.data.searchSuppliers({ ...a, limit: a.limit ?? 10, page: a.page ?? 1 }, cred(ctx));
-      const adm = rows.length ? await ctx.enforcer.admit(ctx.account, 'supplier', rows, (s) => s.id) : { allowed: [], withheld: 0, upgrade: undefined };
-      return ok({ suppliers: adm.allowed, returned: adm.allowed.length, notice: capNotice(adm.withheld, adm.upgrade) });
+      const rows = await ctx.data.searchSuppliers({ ...a, limit: bounded.limit, page: a.page ?? 1 }, cred(ctx));
+      const visible = applyPreview(ctx.account, rows);
+      const adm = visible.rows.length ? await ctx.enforcer.admit(ctx.account, 'supplier', visible.rows, (s) => s.id) : { allowed: [], withheld: 0, upgrade: undefined };
+      return ok({ suppliers: adm.allowed, returned: adm.allowed.length, notice: joinNotice(limitNotice(adm.withheld, adm.upgrade, ctx.directory), visible.notice) });
     }),
   );
 
-  server.registerTool(
+  if (want('get_supplier')) server.registerTool(
     'get_supplier',
     {
       title: 'Get supplier profile',
@@ -232,6 +297,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
       inputSchema: { supplier_id: z.string().min(1).max(200).describe('Supplier id (slug) from search_suppliers') },
       outputSchema: { supplier: SupplierSchema },
       annotations: { title: 'Get supplier profile', ...READ_ONLY },
+      ...meta(ctx, 'get_supplier'),
     },
     run(ctx, 'get_supplier', async (a: { supplier_id: string }, ctx) => {
       need(ctx, 'suppliers');
@@ -242,33 +308,38 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
     }),
   );
 
-  server.registerTool(
+  if (want('search_ingredients')) server.registerTool(
     'search_ingredients',
     {
       title: 'Search ingredients',
-      description: 'Search the Journey ingredient database by name and get matching ingredient ids with nutrition and sustainability scores. Use get_ingredient for the full profile.',
+      description: 'Search the Journey ingredient database by name and get matching ingredient ids with nutrition and sustainability scores. Use get_ingredient for the full profile. Callers without full catalog access receive at most 4 results, with a note that more need a Journey account.',
       inputSchema: {
         query: z.string().min(2).max(200).describe('Ingredient name or keyword, e.g. "oat" or "pea protein"'),
         limit: z.number().int().min(1).max(25).default(10).describe('Maximum ingredients to return (1-25)'),
       },
       outputSchema: { ingredients: z.array(IngredientSummarySchema), returned: z.number().int(), notice },
       annotations: { title: 'Search ingredients', ...READ_ONLY },
+      ...meta(ctx, 'search_ingredients'),
     },
     run(ctx, 'search_ingredients', async (a: { query: string; limit?: number }, ctx) => {
       need(ctx, 'ingredients');
+      const requested = a.limit ?? 10;
+      const bounded = previewQuery(ctx.account, requested, 1);
+      if (bounded.blocked) return ok({ ingredients: [], returned: 0, notice: bounded.notice });
       await ctx.enforcer.assertCapacity(ctx.account, 'ingredient');
-      const rows = (await ctx.data.searchIngredients(a.query, a.limit ?? 10, cred(ctx))).map((i) => ({
+      const rows = (await ctx.data.searchIngredients(a.query, bounded.limit, cred(ctx))).map((i) => ({
         id: i.id,
         name: i.name,
         nutrition_score: i.nutrition_score ?? null,
         sustainability_score: i.sustainability_score ?? null,
       }));
-      const adm = rows.length ? await ctx.enforcer.admit(ctx.account, 'ingredient', rows, (x) => x.id) : { allowed: [], withheld: 0, upgrade: undefined };
-      return ok({ ingredients: adm.allowed, returned: adm.allowed.length, notice: capNotice(adm.withheld, adm.upgrade) });
+      const visible = applyPreview(ctx.account, rows);
+      const adm = visible.rows.length ? await ctx.enforcer.admit(ctx.account, 'ingredient', visible.rows, (x) => x.id) : { allowed: [], withheld: 0, upgrade: undefined };
+      return ok({ ingredients: adm.allowed, returned: adm.allowed.length, notice: joinNotice(limitNotice(adm.withheld, adm.upgrade, ctx.directory), visible.notice) });
     }),
   );
 
-  server.registerTool(
+  if (want('get_ingredient')) server.registerTool(
     'get_ingredient',
     {
       title: 'Get ingredient profile',
@@ -279,6 +350,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
       },
       outputSchema: { ingredient: IngredientSchema, matched_by: z.enum(['id', 'name']) },
       annotations: { title: 'Get ingredient profile', ...READ_ONLY },
+      ...meta(ctx, 'get_ingredient'),
     },
     run(ctx, 'get_ingredient', async (a: { ingredient_id?: string; name?: string }, ctx) => {
       need(ctx, 'ingredients');
@@ -297,7 +369,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
     }),
   );
 
-  server.registerTool(
+  if (want('get_ingredient_price')) server.registerTool(
     'get_ingredient_price',
     {
       title: 'Get ingredient price index',
@@ -309,6 +381,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
       },
       outputSchema: { price: PriceSchema, forecast: PriceForecastSchema.optional() },
       annotations: { title: 'Get ingredient price', ...READ_ONLY },
+      ...meta(ctx, 'get_ingredient_price'),
     },
     run(ctx, 'get_ingredient_price', async (a: { ingredient: string; days?: number; include_forecast?: boolean }, ctx) => {
       need(ctx, 'prices');
@@ -327,7 +400,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
     }),
   );
 
-  server.registerTool(
+  if (want('list_price_series')) server.registerTool(
     'list_price_series',
     {
       title: 'List price series',
@@ -335,6 +408,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
       inputSchema: {},
       outputSchema: { series: z.array(PriceSeriesSummarySchema), returned: z.number().int() },
       annotations: { title: 'List price series', ...READ_ONLY },
+      ...meta(ctx, 'list_price_series'),
     },
     run(ctx, 'list_price_series', async (_a: Record<string, never>, ctx) => {
       need(ctx, 'prices');
@@ -343,7 +417,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
     }),
   );
 
-  server.registerTool(
+  if (want('compare_suppliers')) server.registerTool(
     'compare_suppliers',
     {
       title: 'Compare suppliers',
@@ -361,6 +435,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
         notice,
       },
       annotations: { title: 'Compare suppliers', ...READ_ONLY },
+      ...meta(ctx, 'compare_suppliers'),
     },
     run(ctx, 'compare_suppliers', async (a: { supplier_ids: string[] }, ctx) => {
       need(ctx, 'suppliers');
@@ -392,16 +467,16 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
           })),
         },
         not_found: notFound,
-        notice: capNotice(adm.withheld, adm.upgrade),
+        notice: limitNotice(adm.withheld, adm.upgrade, ctx.directory),
       });
     }),
   );
 
-  server.registerTool(
+  if (want('search_products')) server.registerTool(
     'search_products',
     {
       title: 'Search my products',
-      description: "List or search the signed-in Journey account's own products (formulations) by name, optionally filtered by status. Needs a Journey app account connected with OAuth.",
+      description: "List or search the signed-in Journey account's own products (formulations) by name, optionally filtered by status. Needs a Journey app account connected with OAuth. Callers without full catalog access receive at most 4 results, with a note that more need a Journey account.",
       inputSchema: {
         query: z.string().min(1).max(200).optional().describe('Product name contains, case-insensitive'),
         status: z.enum(['active', 'concept', 'discontinued']).optional().describe('Product status filter'),
@@ -410,17 +485,22 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
       },
       outputSchema: { products: z.array(ProductSummarySchema), returned: z.number().int(), total: z.number().int().nullable(), notice },
       annotations: { title: 'Search my products', ...READ_ONLY },
+      ...meta(ctx, 'search_products'),
     },
     run(ctx, 'search_products', async (a: { query?: string; status?: 'active' | 'concept' | 'discontinued'; page?: number; limit?: number }, ctx) => {
       need(ctx, 'products');
+      const requested = a.limit ?? 10;
+      const bounded = previewQuery(ctx.account, requested, a.page ?? 1);
+      if (bounded.blocked) return ok({ products: [], returned: 0, total: null, notice: bounded.notice });
       await ctx.enforcer.assertCapacity(ctx.account, 'product');
-      const r = await ctx.data.searchProducts({ query: a.query, status: a.status, page: a.page ?? 1, limit: a.limit ?? 10 }, cred(ctx));
-      const adm = r.products.length ? await ctx.enforcer.admit(ctx.account, 'product', r.products, (p) => p.id) : { allowed: [], withheld: 0, upgrade: undefined };
-      return ok({ products: adm.allowed, returned: adm.allowed.length, total: r.total, notice: capNotice(adm.withheld, adm.upgrade) });
+      const r = await ctx.data.searchProducts({ query: a.query, status: a.status, page: a.page ?? 1, limit: bounded.limit }, cred(ctx));
+      const visible = applyPreview(ctx.account, r.products);
+      const adm = visible.rows.length ? await ctx.enforcer.admit(ctx.account, 'product', visible.rows, (p) => p.id) : { allowed: [], withheld: 0, upgrade: undefined };
+      return ok({ products: adm.allowed, returned: adm.allowed.length, total: r.total, notice: joinNotice(limitNotice(adm.withheld, adm.upgrade, ctx.directory), visible.notice) });
     }),
   );
 
-  server.registerTool(
+  if (want('get_product')) server.registerTool(
     'get_product',
     {
       title: 'Get my product',
@@ -431,6 +511,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
       },
       outputSchema: { product: ProductSchema },
       annotations: { title: 'Get my product', ...READ_ONLY },
+      ...meta(ctx, 'get_product'),
     },
     run(ctx, 'get_product', async (a: { product_id: string; sections?: ('summary' | 'ingredients' | 'nutrition')[] }, ctx) => {
       need(ctx, 'products');
@@ -451,7 +532,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
     }),
   );
 
-  server.registerTool(
+  if (want('verify_lab_result')) server.registerTool(
     'verify_lab_result',
     {
       title: 'Verify Journey Labs result',
@@ -463,6 +544,7 @@ export function registerTools(server: McpServer, ctx: ToolContext) {
       },
       outputSchema: { result: LabResultSchema },
       annotations: { title: 'Verify Journey Labs result', ...READ_ONLY },
+      ...meta(ctx, 'verify_lab_result'),
     },
     run(ctx, 'verify_lab_result', async (a: { subject: string; subject_type?: LabSubjectType; result_id?: string }, ctx) => {
       need(ctx, 'labs');

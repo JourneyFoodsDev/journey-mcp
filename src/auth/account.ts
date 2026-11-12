@@ -16,8 +16,17 @@ export interface Account {
   userId?: string;
   /** Company or price-feed account that owns the allowance. Sent as companyId. */
   companyId?: string;
-  authMethod: 'oauth' | 'api_key' | 'local';
+  authMethod: 'oauth' | 'api_key' | 'local' | 'anonymous';
   scopes: string[];
+  /** Display name from the identity token, when the provider sent one. Never invented. */
+  displayName?: string;
+  /** Email from the identity token, when the provider sent one. Never invented. */
+  email?: string;
+  /**
+   * OAuth only. True when the token carries https://journeyfoods.io/full_catalog.
+   * Absent means the 4-result search gate. API keys use tier instead.
+   */
+  fullCatalogAccess?: boolean;
   /** Credential to forward upstream when the caller authenticated with their own Journey API key. Never logged. */
   upstreamApiKey?: string;
   /** Journey app session token for the signed-in user (remote OAuth server only). Never logged. */
@@ -26,3 +35,8 @@ export interface Account {
 }
 
 export const fingerprint = (secret: string) => createHash('sha256').update(secret).digest('hex').slice(0, 16);
+
+/** Shared anonymous identity. Lifetime caps are not recorded for this method. */
+export function anonymousAccount(): Account {
+  return { id: 'anon', authMethod: 'anonymous', scopes: [], tier: null };
+}
