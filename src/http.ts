@@ -11,6 +11,7 @@ import type { JourneyData } from './api/types.js';
 import type { Enforcer } from './policy/enforcer.js';
 import type { UsageSink } from './telemetry/usage-events.js';
 import { createMcpServer } from './server.js';
+import { securityHeaders } from './security-headers.js';
 
 export interface HttpDeps {
   cfg: JourneyConfig;
@@ -34,6 +35,7 @@ export function createHttpApp(deps: HttpDeps) {
   const { cfg, log } = deps;
   const app = express();
   app.disable('x-powered-by');
+  app.use(securityHeaders);
   app.use(express.json({ limit: '256kb' }));
 
   const metadataUrl = new URL('/.well-known/oauth-protected-resource' + new URL(cfg.resourceUrl).pathname, cfg.resourceUrl).toString();
