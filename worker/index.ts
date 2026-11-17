@@ -5,6 +5,7 @@ import { buildRuntime } from '../src/runtime.js';
 import { createMcpServer } from '../src/server.js';
 import { readSecretBinding } from '../src/auth/end-user.js';
 import { AuthError } from '../src/errors.js';
+import { createOAuthProvider, mcpResource, resourceMetadataUrl } from './oauth.js';
 export { AccountLedger, JourneyMcp } from './durable-objects.js';
 
 /**
@@ -78,53 +79,103 @@ function runtime(env: WorkerEnv) {
   return runtimePromise;
 }
 
-function unauthorized(message = 'Authentication required. Send a Journey API key in the x-api-key header.'): Response {
+function unauthorized(message = 'Authentication required. Send a Journey API key in the x-api-key header.', resourceMetadata?: string): Response {
+  const meta = resourceMetadata ? `, resource_metadata="${resourceMetadata}"` : '';
   return new Response(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message }, id: null }), {
     status: 401,
     headers: {
       'content-type': 'application/json',
       'cache-control': 'no-store',
-      'www-authenticate': 'Bearer realm="Journey AI", error="invalid_token", error_description="Send a Journey API key in x-api-key. Get a free trial key at https://price.journeyfoods.io"',
+      'www-authenticate': `Bearer realm="Journey AI", error="invalid_token", error_description="Sign in with OAuth or send a Journey API key in x-api-key. Get a free trial key at https://price.journeyfoods.io"${meta}`,
     },
   });
 }
 
-export default {
-  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
-    const url = new URL(request.url);
-    if (request.method === 'GET' && url.pathname === '/') {
-      return Response.json({ name: 'Journey AI', mcp: `${url.origin}/mcp`, auth: ['api_key'], docs: 'https://journeyfoods.io/mcp' });
-    }
-    // Every data endpoint requires an API key. `/` is discovery only and returns no Journey data.
-    if (url.pathname !== '/mcp') return Response.json({ error: 'not_found' }, { status: 404 });
-    if (request.method !== 'POST') {
-      return Response.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed. This server is stateless; use POST.' }, id: null }, { status: 405 });
-    }
-    const apiKey = request.headers.get('x-api-key')?.trim();
-    if (!apiKey) return unauthorized();
-    const rt = await runtime(env);
-    let account;
-    try {
-      account = await rt.keys.resolve(apiKey);
-    } catch (e) {
-      return unauthorized(e instanceof AuthError ? e.message : 'Authentication failed.');
-    }
-    const server = createMcpServer({
-      account,
-      data: rt.data,
-      enforcer: rt.enforcer,
-      log: rt.log,
-      usage: rt.usage,
-      transport: 'worker',
-      client: () => ({ userAgent: request.headers.get('user-agent') ?? undefined }),
+/** CORS for browser-based MCP clients and connector setup. Credentials are headers, never cookies, on /mcp. */
+export const CORS_HEADERS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+  'access-control-allow-headers': 'Authorization, Content-Type, Accept, x-api-key, mcp-session-id, mcp-protocol-version, last-event-id',
+  'access-control-expose-headers': 'WWW-Authenticate, mcp-session-id, mcp-protocol-version, Retry-After',
+  'access-control-max-age': '86400',
+};
+
+function withCors(response: Response, request: Request): Response {
+  const url = new URL(request.url);
+  // The sign-in page is a top-level page, not an API.
+  if (url.pathname === '/authorize') return response;
+  const out = new Response(response.body, response);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) if (!out.headers.has(k)) out.headers.set(k, v);
+  return out;
+}
+
+/** One MCP request for a Journey API key. x-api-key and OAuth bearer tokens both end here. */
+export async function serveMcp(request: Request, env: WorkerEnv, apiKey: string): Promise<Response> {
+  if (request.method !== 'POST') {
+    return Response.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed. This server is stateless; use POST.' }, id: null }, { status: 405, headers: { allow: 'POST, OPTIONS' } });
+  }
+  const rt = await runtime(env);
+  let account;
+  try {
+    account = await rt.keys.resolve(apiKey);
+  } catch (e) {
+    return unauthorized(e instanceof AuthError ? e.message : 'Authentication failed.');
+  }
+  const server = createMcpServer({
+    account,
+    data: rt.data,
+    enforcer: rt.enforcer,
+    log: rt.log,
+    usage: rt.usage,
+    transport: 'worker',
+    client: () => ({ userAgent: request.headers.get('user-agent') ?? undefined }),
+  });
+  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  await server.connect(transport);
+  try {
+    return await transport.handleRequest(request);
+  } finally {
+    await transport.close();
+    await server.close();
+  }
+}
+
+async function route(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
+  const url = new URL(request.url);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS_HEADERS });
+  if (request.method === 'GET' && url.pathname === '/') {
+    return Response.json({
+      name: 'Journey AI',
+      mcp: `${url.origin}/mcp`,
+      auth: ['api_key', 'oauth'],
+      oauth: { protected_resource_metadata: resourceMetadataUrl(mcpResource(env)), authorization_server: `${url.origin}/.well-known/oauth-authorization-server` },
+      docs: 'https://journeyfoods.io/mcp',
     });
-    const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    await server.connect(transport);
-    try {
-      return await transport.handleRequest(request);
-    } finally {
-      await transport.close();
-      await server.close();
+  }
+  if (url.pathname === '/mcp') {
+    // x-api-key: unchanged path for Claude Code, Cursor and scripts.
+    const apiKey = request.headers.get('x-api-key');
+    if (apiKey !== null) {
+      if (!apiKey.trim()) return unauthorized();
+      return serveMcp(request, env, apiKey.trim());
     }
+    // No credential at all: point the client at OAuth discovery (MCP authorization spec, RFC 9728).
+    if (!request.headers.get('authorization')) return unauthorized(undefined, resourceMetadataUrl(mcpResource(env)));
+  }
+  if (!env.OAUTH_KV) return Response.json({ error: 'not_found' }, { status: 404 });
+  const provider = createOAuthProvider(env, { serveMcp, resolveKey: async (e, key) => (await runtime(e)).keys.resolve(key) });
+  // Some clients probe the root form of RFC 9728 metadata; serve the same document as the /mcp form.
+  if (url.pathname === '/.well-known/oauth-protected-resource') {
+    const canonical = new URL(resourceMetadataUrl(mcpResource(env)));
+    if (canonical.pathname !== url.pathname) return provider.fetch(new Request(canonical.href, request), env as any, ctx);
+  }
+  // Bearer tokens on /mcp, OAuth metadata, /register, /authorize and /token.
+  return provider.fetch(request, env as any, ctx);
+}
+
+export default {
+  async fetch(request: Request, env: WorkerEnv, ctx?: ExecutionContext): Promise<Response> {
+    const fallbackCtx = ctx ?? ({ waitUntil() {}, passThroughOnException() {}, props: {} } as unknown as ExecutionContext);
+    return withCors(await route(request, env, fallbackCtx), request);
   },
 };
