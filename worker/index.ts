@@ -5,6 +5,7 @@ import { buildRuntime } from '../src/runtime.js';
 import { createMcpServer } from '../src/server.js';
 import { readSecretBinding } from '../src/auth/end-user.js';
 import { AuthError } from '../src/errors.js';
+import { withSecurityHeaders } from '../src/security-headers.js';
 export { AccountLedger, JourneyMcp } from './durable-objects.js';
 
 /**
@@ -89,42 +90,46 @@ function unauthorized(message = 'Authentication required. Send a Journey API key
   });
 }
 
+async function routeRequest(request: Request, env: WorkerEnv): Promise<Response> {
+  const url = new URL(request.url);
+  if (request.method === 'GET' && url.pathname === '/') {
+    return Response.json({ name: 'Journey AI', mcp: `${url.origin}/mcp`, auth: ['api_key'], docs: 'https://journeyfoods.io/mcp' });
+  }
+  // Every data endpoint requires an API key. `/` is discovery only and returns no Journey data.
+  if (url.pathname !== '/mcp') return Response.json({ error: 'not_found' }, { status: 404 });
+  if (request.method !== 'POST') {
+    return Response.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed. This server is stateless; use POST.' }, id: null }, { status: 405 });
+  }
+  const apiKey = request.headers.get('x-api-key')?.trim();
+  if (!apiKey) return unauthorized();
+  const rt = await runtime(env);
+  let account;
+  try {
+    account = await rt.keys.resolve(apiKey);
+  } catch (e) {
+    return unauthorized(e instanceof AuthError ? e.message : 'Authentication failed.');
+  }
+  const server = createMcpServer({
+    account,
+    data: rt.data,
+    enforcer: rt.enforcer,
+    log: rt.log,
+    usage: rt.usage,
+    transport: 'worker',
+    client: () => ({ userAgent: request.headers.get('user-agent') ?? undefined }),
+  });
+  const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  await server.connect(transport);
+  try {
+    return await transport.handleRequest(request);
+  } finally {
+    await transport.close();
+    await server.close();
+  }
+}
+
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
-    const url = new URL(request.url);
-    if (request.method === 'GET' && url.pathname === '/') {
-      return Response.json({ name: 'Journey AI', mcp: `${url.origin}/mcp`, auth: ['api_key'], docs: 'https://journeyfoods.io/mcp' });
-    }
-    // Every data endpoint requires an API key. `/` is discovery only and returns no Journey data.
-    if (url.pathname !== '/mcp') return Response.json({ error: 'not_found' }, { status: 404 });
-    if (request.method !== 'POST') {
-      return Response.json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed. This server is stateless; use POST.' }, id: null }, { status: 405 });
-    }
-    const apiKey = request.headers.get('x-api-key')?.trim();
-    if (!apiKey) return unauthorized();
-    const rt = await runtime(env);
-    let account;
-    try {
-      account = await rt.keys.resolve(apiKey);
-    } catch (e) {
-      return unauthorized(e instanceof AuthError ? e.message : 'Authentication failed.');
-    }
-    const server = createMcpServer({
-      account,
-      data: rt.data,
-      enforcer: rt.enforcer,
-      log: rt.log,
-      usage: rt.usage,
-      transport: 'worker',
-      client: () => ({ userAgent: request.headers.get('user-agent') ?? undefined }),
-    });
-    const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    await server.connect(transport);
-    try {
-      return await transport.handleRequest(request);
-    } finally {
-      await transport.close();
-      await server.close();
-    }
+    return withSecurityHeaders(await routeRequest(request, env));
   },
 };

@@ -6,6 +6,7 @@
 - The hosted Worker reads `JOURNEY_PRICE_API_KEY` from the Secrets Store for price tools. Ingredient calls send the caller's developer key in `x-api-key`. A price-feed key is not sent to the fallback dev API.
 - Self-serve data access is exactly 2% of each dataset per company or account. The Startup 4,000 ingredient cap is removed. Fresh has no supplier-network allowance. Supplier is a paid plan. Enterprise is uncapped only while status is active or trialing.
 - Supplier, ingredient, product and lab calls forward a signed `x-journey-end-user` when `JOURNEY_END_USER_SIGNING_SECRET` is set. API-key identity prefers the price feed account's company or account id so a new key does not reset the cap.
+- HTTP responses send `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`. Express's unmatched-route HTML page is the only document response. It has no subresources, and its policy also sets `base-uri 'none'` and `form-action 'none'`.
 
 ## 0.2.1 (2026-10-26)
 - Ingredient calls use the developer API at `https://devapi.journeyfoods.io` with the `x-api-key` header. `JOURNEY_API_BASE_URL` overrides that default. The key is `JOURNEY_API_KEY` from `https://dev.journeyfoods.io`. A price-feed key is not sent there.

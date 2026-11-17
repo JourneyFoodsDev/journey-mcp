@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { withSecurityHeaders } from '../src/security-headers.js';
 
 /**
  * Live sqlite classes. Exported so a deploy keeps the existing namespaces
@@ -7,12 +8,12 @@ import { DurableObject } from 'cloudflare:workers';
  */
 export class JourneyMcp extends DurableObject {
   async fetch(): Promise<Response> {
-    return Response.json({ error: 'not_served_here' }, { status: 501 });
+    return withSecurityHeaders(Response.json({ error: 'not_served_here' }, { status: 501 }));
   }
 }
 
 export class AccountLedger extends DurableObject {
   async fetch(): Promise<Response> {
-    return Response.json({ error: 'not_served_here' }, { status: 501 });
+    return withSecurityHeaders(Response.json({ error: 'not_served_here' }, { status: 501 }));
   }
 }

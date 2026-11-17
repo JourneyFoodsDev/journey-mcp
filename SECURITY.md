@@ -10,3 +10,4 @@ Please report security issues privately through GitHub's **Report a vulnerabilit
 - Keys come only from the environment or the request header. They are never logged, stored or returned, and each key is only sent to the service that issued it.
 - Usage events record the account, tool, counts, client and latency. They never record arguments or returned data.
 - Caps and rate limits belong to the company or account, not to an API key, and are enforced on the server, not by the client.
+- Every HTTP response sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and `Content-Security-Policy`. JSON and event-stream responses use `default-src 'none'; frame-ancestors 'none'`. The only HTML is Express's built-in error page, which has no subresources and adds `base-uri 'none'` and `form-action 'none'`.
