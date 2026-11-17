@@ -1,4 +1,5 @@
-# npm Trusted Publishing. The credential is the GitHub OIDC token (id-token: write), not an NPM_TOKEN.
+# npm Trusted Publishing. Auth is the GitHub OIDC token (id-token: write).
+# Do not set NPM_TOKEN or NODE_AUTH_TOKEN.
 name: Publish
 
 on:
@@ -14,9 +15,21 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
         with:
-          node-version: "22"
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
           registry-url: https://registry.npmjs.org
-      - run: npm ci && npm test && npm publish --provenance --access public
+          package-manager-cache: false
+      # Trusted publishing needs npm >= 11.5.1. Node 24 usually includes it;
+      # this pin keeps the publish step from falling back to a token.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          node --version
+          npm install -g npm@^11.5.1
+          npm --version
+      - run: npm ci
+      - run: npm test
+      - run: npm publish --provenance --access public

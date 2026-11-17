@@ -100,13 +100,29 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ## Release
 
-Push a `v*` tag, such as `v0.2.1`, to publish that commit. [`.github/workflows/publish.yml`](.github/workflows/publish.yml) runs on GitHub Actions with Node 22:
+Push a `v*` tag, such as `v0.2.2`, to publish that commit. [`.github/workflows/publish.yml`](.github/workflows/publish.yml) runs on GitHub Actions with Node 24 and npm 11.5.1 or later:
 
 ```bash
 npm ci && npm test && npm publish --provenance --access public
 ```
 
-The workflow uses npm Trusted Publishing (`permissions: id-token: write`). It does not use an `NPM_TOKEN`. Before the first tag, add this repository and `publish.yml` as a trusted publisher for `@journeyfoods/mcp` on npmjs.com. Tag the commit whose `package.json` version you want to ship (`v0.2.1` publishes `0.2.1`). `prepublishOnly` builds the package and runs the tests again before upload.
+The workflow uses npm Trusted Publishing (`permissions: id-token: write`). It does not use an `NPM_TOKEN`. Tag the commit whose `package.json` version you want to ship (`v0.2.2` publishes `0.2.2`). `prepublishOnly` builds the package and runs the tests again before upload.
+
+### One-time npm trusted publisher setup
+
+A package maintainer must do this once on npmjs.com, signed in as `journeyfoods`. Do not create a new access token.
+
+1. Open [the `@journeyfoods/mcp` package settings](https://www.npmjs.com/package/@journeyfoods/mcp/access).
+2. In **Trusted Publisher**, choose **GitHub Actions**.
+3. Fill in:
+   - **Organization or user:** `JourneyFoodsDev`
+   - **Repository:** `journey-mcp`
+   - **Workflow filename:** `publish.yml` (filename only, including `.yml`)
+   - **Environment name:** leave blank
+   - **Allowed actions:** also allow `npm publish`. New publishers default to `npm stage publish` only, and this workflow calls `npm publish`.
+4. Save. The first successful publish must happen within two days of adding the publisher, or npm invalidates the configuration and it has to be added again.
+
+After that first successful publish, delete the `journey-mcp-publish` granular access token on the npm account. Publishing no longer needs it.
 
 ## License
 
