@@ -5,7 +5,7 @@ import { DEFAULT_PRICE_API_BASE_URL } from '../src/config.js';
 describe('hosted worker', () => {
   it('serves the public root and requires an API key on /mcp', async () => {
     const root = await worker.fetch(new Request('https://mcp.journeyfoods.io/'), {});
-    expect(await root.json()).toMatchObject({ name: 'Journey AI', mcp: 'https://mcp.journeyfoods.io/mcp', auth: ['api_key'] });
+    expect(await root.json()).toMatchObject({ name: 'Journey AI', mcp: 'https://mcp.journeyfoods.io/mcp', auth: ['api_key', 'oauth'] });
     const denied = await worker.fetch(new Request('https://mcp.journeyfoods.io/mcp', { method: 'POST', body: '{}' }), {});
     expect(denied.status).toBe(401);
     expect(denied.headers.get('www-authenticate')).toContain('price.journeyfoods.io');
