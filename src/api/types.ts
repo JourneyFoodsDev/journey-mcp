@@ -24,11 +24,11 @@ export const IngredientSchema = z.object({
   image_url: z.string().nullable().optional(),
   nutrition_score: z.number().nullable().optional(),
   sustainability_score: z.number().nullable().optional(),
-  nutrition_per_100g: z.record(z.number().nullable()).optional(),
-  nutrients: z.record(z.union([z.string(), z.number(), z.null()])).optional(),
+  nutrition_per_100g: z.record(z.string(), z.number().nullable()).optional(),
+  nutrients: z.record(z.string(), z.union([z.string(), z.number(), z.null()])).optional(),
   allergens: z.array(z.string()).optional(),
   allergens_by_country: z.array(z.string()).optional(),
-  attributes: z.record(z.unknown()).optional(),
+  attributes: z.record(z.string(), z.unknown()).optional(),
 });
 export type Ingredient = z.infer<typeof IngredientSchema>;
 
@@ -114,12 +114,12 @@ export const ProductSummarySchema = z.object({
 export type ProductSummary = z.infer<typeof ProductSummarySchema>;
 
 export const ProductSchema = ProductSummarySchema.extend({
-  ingredients: z.array(z.record(z.unknown())).optional(),
-  nutrition: z.record(z.unknown()).nullable().optional(),
+  ingredients: z.array(z.record(z.string(), z.unknown())).optional(),
+  nutrition: z.record(z.string(), z.unknown()).nullable().optional(),
   nutrition_score: z.unknown().optional(),
   serving_size: z.unknown().optional(),
   serving_size_unit: z.string().nullable().optional(),
-  attributes: z.record(z.unknown()).optional(),
+  attributes: z.record(z.string(), z.unknown()).optional(),
 });
 export type Product = z.infer<typeof ProductSchema>;
 
