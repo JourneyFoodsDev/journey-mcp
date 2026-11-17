@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Security updates from the Nov 17 2026 npm audit. Zod is 4.6.7, Vitest is 5, and `body-parser` is patched. Ingredient and product record fields declare string keys. Tool behavior is unchanged.
 - Atlas outage (Nov 2 2026): the hosted Worker reads ingredients from `https://journey-fallback.journeyfoods.workers.dev/x/devapi` and supplier/app data from `https://journey-fallback.journeyfoods.workers.dev/x/mcp`. Revert those vars to Cloud Run / `https://devapi.journeyfoods.io` when Atlas is back (`mcp_rollback_vars.json`). The price feed stays `https://price.journeyfoods.io`. Price tools return a base-100 index and P10–P90 ranges only.
 - `worker/wrangler.jsonc` declares the live bindings (`MCP_OBJECT`, `ACCOUNT_LEDGER`, `OAUTH_KV`, `USAGE_EVENTS`, and the secrets-store secrets) so a deploy does not drop them.
 - The hosted Worker reads `JOURNEY_PRICE_API_KEY` from the Secrets Store for price tools. Ingredient calls send the caller's developer key in `x-api-key`. A price-feed key is not sent to the fallback dev API.
